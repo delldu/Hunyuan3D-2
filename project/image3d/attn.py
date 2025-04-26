@@ -89,7 +89,7 @@ class MultiheadCrossAttention(nn.Module):
 class ResidualCrossAttentionBlock(nn.Module):
     def __init__(self, n_data=512, width=1024, heads=16, mlp_expand_ratio=4, data_width=1024):
         super().__init__()
-        self.attn = MultiheadCrossAttention(n_data=n_data, width=width, heads=heads, data_width=data_widthe)
+        self.attn = MultiheadCrossAttention(n_data=n_data, width=width, heads=heads, data_width=data_width)
         self.ln_1 = nn.LayerNorm(width, elementwise_affine=True, eps=1e-6)
         self.ln_2 = nn.LayerNorm(data_width, elementwise_affine=True, eps=1e-6)
         self.ln_3 = nn.LayerNorm(width, elementwise_affine=True, eps=1e-6)
