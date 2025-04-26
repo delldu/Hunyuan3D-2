@@ -20,7 +20,7 @@ from . import shape
 
 import pdb
 
-def image_center(images, border_ratio = 0.15):
+def image_center(image, border_ratio = 0.15):
     B, C, H, W = image.size()
     assert C == 4
     mask = image[:, 3:4, :, :]
@@ -56,8 +56,9 @@ def get_shape_model():
 
     # model = vae.ShapeVAE()
     # model = dit.Hunyuan3DDiT()
-    model = shape.Generator()
-    model = model.to(device)
+    device = todos.model.get_device()    
+    model = shape.Generator(device)
+    # model = model.to(device)
     model.eval()
 
     if "cpu" in str(device.type):

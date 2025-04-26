@@ -60,8 +60,9 @@ def image_transform(image):
     return T(image)
 
 class Generator(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
+        self.device = device
         self.dinov2_model = Dinov2Model()
         self.dit_model = Hunyuan3DDiT()
         self.vae_model = ShapeVAE()
@@ -69,7 +70,11 @@ class Generator(nn.Module):
 
     def forward(self, image):
         image = image_transform(image)
+
+        self.dinov2_model.to(self.device)
         dinov2_output = self.dinov2_model(image)
+        self.dinov2_model.cpu()
+
         todos.debug.output_var("dinov2_output", dinov2_output)
 
         dit_condition = torch.cat((dinov2_output, torch.zeros_like(dinov2_output)), dim = 0)
@@ -85,6 +90,7 @@ class Generator(nn.Module):
         pbar = tqdm(total=num_inference_steps, desc="Diffusion Sampling:")
         guidance_scale = 5.0
 
+        self.dit_model.to(self.device)
         for i in range(num_inference_steps):
             pbar.update(1)
             latent_model_input = torch.cat([latents] * 2, dim=0) # size() -- [2, 512, 64]
@@ -120,8 +126,13 @@ class Generator(nn.Module):
             if (i < num_inference_steps - 1):
                 latents = latents + scale * noise_pred
 
+        self.dit_model.cpu()
+
         todos.debug.output_var("latents", latents)
+
+        self.vae_model.to(self.device)
         mesh = self.vae_model(latents)
+        self.vae_model.cpu()
 
         return mesh
 

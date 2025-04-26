@@ -5,6 +5,8 @@ from .attn import FourierEmbedder, Transformer, CrossAttentionDecoder
 import numpy as np
 from skimage import measure
 import trimesh
+from tqdm import tqdm
+from einops import repeat
 
 # from .surface_extractors import MCSurfaceExtractor
 # from .volume_decoders import VanillaVolumeDecoder
@@ -98,7 +100,7 @@ class ShapeVAE(nn.Module):
         grid_res = 384
         num_chunks = 8000
         batch_size = latents.shape[0] # 1
-        xyz_samples, grid_size = dense_grid(384)
+        xyz_samples = dense_grid(384)
         xyz_samples = xyz_samples.view(-1, 3).to(latents.device)
         # tensor [xyz_samples] size: [57066625, 3], min: -1.009766, max: 1.009766, mean: 0.0
 
