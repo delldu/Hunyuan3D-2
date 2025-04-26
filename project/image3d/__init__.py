@@ -97,10 +97,11 @@ def predict(input_files, output_dir):
         progress_bar.update(1)
 
         input_tensor = todos.data.load_rgba_tensor(filename)
-        input_tensor = image_center(input_tensor)[:, 0:3, :, :]
+        input_tensor = image_center(input_tensor)[:, 0:3, :, :].to(device)
 
         # model = model.half()
-        output_mesh = todos.model.forward(model, device, input_tensor)
+        with torch.no_grad():
+            output_mesh = model(input_tensor)
 
         # output_file = f"{output_dir}/{os.path.basename(filename)}"
 
