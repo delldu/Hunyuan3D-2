@@ -11,4 +11,4 @@
 
 import image3d
 
-image3d.predict("images/*.png", "output")
+image3d.predict("images/demo*.png", "output")

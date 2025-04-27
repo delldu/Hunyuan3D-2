@@ -135,7 +135,6 @@ class MultiheadAttention(nn.Module):
         self.c_qkv = nn.Linear(width, width * 3, bias=False)
         self.c_proj = nn.Linear(width, width)
         self.attention = QKVMultiheadAttention(heads=heads, n_ctx=n_ctx, width=width)
-        # pdb.set_trace()
 
     def forward(self, x):
         x = self.c_qkv(x)
@@ -172,7 +171,6 @@ class Transformer(nn.Module):
                 ResidualAttentionBlock(n_ctx=n_ctx, width=width, heads=heads) for _ in range(layers)
             ]
         )
-        # pdb.set_trace()
 
     def forward(self, x):
         for block in self.resblocks:

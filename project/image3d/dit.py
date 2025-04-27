@@ -22,6 +22,10 @@ def timestep_embedding(t, dim=256, max_period=10000, time_factor: float = 1000.0
     t = time_factor * t
     half = dim // 2
     freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(t.device)
+    # ============================================================
+    # math.log(max_period) === 6.907755278982137
+    # math.log(max_period)/half === 0.053966838117047944
+    # ============================================================
     # freqs.size() -- [128]
     # freqs
     # tensor([1.000000, 0.947464, 0.897687, 0.850526, 0.805842, 0.763506, 0.723394,
@@ -48,7 +52,8 @@ def timestep_embedding(t, dim=256, max_period=10000, time_factor: float = 1000.0
     # args.size() -- [2, 128]
     # torch.cos(args).size() -- [2, 128]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-    if dim % 2:
+    if dim % 2: # False
+        pdb.set_trace()
         embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
     if torch.is_floating_point(t):  # True
         embedding = embedding.to(t)
@@ -58,6 +63,7 @@ def timestep_embedding(t, dim=256, max_period=10000, time_factor: float = 1000.0
 
 
 class GELU(nn.Module):
+    # https://pytorch.org/docs/stable/generated/torch.nn.GELU.html
     def __init__(self, approximate="tanh"):
         super().__init__()
         self.approximate = approximate
@@ -67,8 +73,11 @@ class GELU(nn.Module):
 
 
 class MLPEmbedder(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int):
+    def __init__(self, in_dim=256, hidden_dim=1024):
         super().__init__()
+        assert in_dim == 256
+        assert hidden_dim == 1024
+
         self.in_layer = nn.Linear(in_dim, hidden_dim, bias=True)
         self.silu = nn.SiLU()
         self.out_layer = nn.Linear(hidden_dim, hidden_dim, bias=True)
@@ -100,29 +109,29 @@ class QKNorm(torch.nn.Module):
         k = self.key_norm(k)
         return q.to(v), k.to(v)
 
-
 class SelfAttention(nn.Module):
     def __init__(self, dim, num_heads = 8):
         super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-
+        # self.num_heads = num_heads
+        # head_dim = dim // num_heads
         self.qkv = nn.Linear(dim, dim * 3, bias=True)
-        self.norm = QKNorm(head_dim)
+        self.norm = QKNorm(dim // num_heads)
         self.proj = nn.Linear(dim, dim)
 
     def forward(self, x):
-        qkv = self.qkv(x)
+        # !!!!!!!!!!!!!!! useless, place holder ...
 
-        todos.debug.output_var("qkv", qkv)
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        todos.debug.output_var("q, k, v", (q, k, v))
-        pdb.set_trace()
+        # qkv = self.qkv(x)
 
-        q, k = self.norm(q, k, v)
-        x = attention(q, k, v)
-        x = self.proj(x)
+        # todos.debug.output_var("qkv", qkv)
+        # q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        # todos.debug.output_var("q, k, v", (q, k, v))
+
+        # q, k = self.norm(q, k, v)
+        # x = attention(q, k, v)
+        # x = self.proj(x)
         return x
+
 
 class SingleModulation(nn.Module):
     def __init__(self, dim: int):
@@ -148,7 +157,6 @@ class DoubleModulation(nn.Module):
         # len(out) == 6, ==> out[0].size() -- [2, 1, 1024]
         return out[0], out[1], out[2], out[3], out[4], out[5] # shift, scale, gate; shift, scale2, gate2
 
-
 class DoubleStreamBlock(nn.Module):
     def __init__(
         self,
@@ -157,7 +165,11 @@ class DoubleStreamBlock(nn.Module):
         mlp_ratio: float,
     ):
         super().__init__()
-        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        assert hidden_size == 1024
+        assert num_heads == 16
+        assert mlp_ratio == 4
+
+        mlp_hidden_dim = int(hidden_size * mlp_ratio) # 4096 ?
         self.num_heads = num_heads
         self.img_mod = DoubleModulation(hidden_size)
         self.img_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
@@ -333,7 +345,7 @@ class Hunyuan3DDiT(nn.Module):
         self.load_weights()
 
     def forward(self, x, t, cond):
-        todos.debug.output_var("x, t, cond", (x, t, cond))
+        # todos.debug.output_var("x, t, cond", (x, t, cond))
 
         # tensor [x] size: [2, 512, 64], min: -4.179688, max: 4.238281, mean: 0.005243
         # tensor [t] size: [2], min: 0.0, max: 0.0, mean: 0.0
@@ -352,13 +364,6 @@ class Hunyuan3DDiT(nn.Module):
 
         for block in self.double_blocks:  # len(self.double_blocks) === 8
             latent, cond = block(img=latent, txt=cond, vec=vec)
-
-        # xxxx_debug
-        # pdb.set_trace()
-        # todos.debug.output_var("(latent, cond)", (latent, cond))
-        # (latent, cond) is tuple: len = 2
-        #     tensor [item] size: [2, 512, 1024], min: -7.246829, max: 6.161581, mean: -0.001496
-        #     tensor [item] size: [2, 1370, 1024], min: -126.588181, max: 138.862991, mean: -0.009303
 
         # tensor [cond] size: [2, 1370, 1024], min: -263.0, max: 3560.0, mean: 0.430395
         # tensor [latent] size: [2, 512, 1024], min: -93.375, max: 106.9375, mean: -0.064714

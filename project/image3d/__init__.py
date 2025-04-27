@@ -38,7 +38,7 @@ def image_center(image, border_ratio = 0.15):
     scale = 512/max(H2, W2)
     H2 = int(scale * H2)
     W2 = int(scale * W2)
-    scale_image = F.interpolate(pad_image, size=(H2, W2))
+    scale_image = F.interpolate(pad_image, size=(H2, W2), mode="bicubic", align_corners=False)
 
     # Center padding ...
     pad_left = (512 - W2)//2
@@ -98,6 +98,7 @@ def predict(input_files, output_dir):
 
         input_tensor = todos.data.load_rgba_tensor(filename)
         input_tensor = image_center(input_tensor)[:, 0:3, :, :].to(device)
+        # input_tensor = F.interpolate(input_tensor[:, 0:3, :, :], size=(512, 512), mode="bicubic", align_corners=False).to(device)
 
         # model = model.half()
         with torch.no_grad():
