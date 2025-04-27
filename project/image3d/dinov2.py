@@ -1,6 +1,7 @@
 import os
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 import todos
 import pdb
@@ -56,8 +57,6 @@ class Dinov2Embeddings(nn.Module):
     #     todos.debug.output_var("patch_pos_embed 3", patch_pos_embed)
     #     patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
     #     todos.debug.output_var("patch_pos_embed 4", patch_pos_embed)
-
-    #     pdb.set_trace()
     #     return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
 
     def forward(self, pixel_values):
@@ -105,7 +104,7 @@ def sdpa_attention_forward(query, key, value, scaling=0.125):
     key = key.contiguous()
     value = value.contiguous()
 
-    attn_output = torch.nn.functional.scaled_dot_product_attention(
+    attn_output = F.scaled_dot_product_attention(
         query, key, value, attn_mask=None, dropout_p=0.0, scale=scaling, is_causal=False
     )
     attn_output = attn_output.transpose(1, 2).contiguous()
@@ -144,7 +143,7 @@ class Dinov2SelfAttention(nn.Module):
         # context_layer.size() -- [1, 1370, 24, 64]
 
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        # new_context_layer_shape -- torch.Size([1, 1370, 1536])
+        # new_context_layer_shape -- [1, 1370, 1536]
 
         context_layer = context_layer.reshape(new_context_layer_shape)
         return context_layer
@@ -155,7 +154,6 @@ class Dinov2SelfOutput(nn.Module):
         super().__init__()
         self.dense = nn.Linear(hidden_size, hidden_size)
 
-    # def forward(self, hidden_states, input_tensor):
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
         return hidden_states
@@ -169,7 +167,7 @@ class Dinov2Attention(nn.Module):
 
     def forward(self, hidden_states):
         self_outputs = self.attention(hidden_states)
-        attention_output = self.output(self_outputs) #, hidden_states)
+        attention_output = self.output(self_outputs)
         return attention_output
 
 
@@ -185,17 +183,12 @@ class Dinov2LayerScale(nn.Module):
 
 # -------------------------------------
 class Dinov2SwiGLUFFN(nn.Module):
-    def __init__(self, hidden_size=1536, mlp_ratio=4):
+    def __init__(self, hidden_size=1536):
         super().__init__()
         assert hidden_size == 1536
-        assert mlp_ratio == 4
-        
-        in_features = out_features = hidden_size
-        hidden_features = int(hidden_size * mlp_ratio) # 6144
-        hidden_features = (int(hidden_features * 2 / 3) + 7) // 8 * 8 # 4096
-        assert hidden_features == 4096
-        self.weights_in = nn.Linear(in_features, 2 * hidden_features, bias=True)
-        self.weights_out = nn.Linear(hidden_features, out_features, bias=True)
+        hidden_features = 4096
+        self.weights_in = nn.Linear(hidden_size, 2 * hidden_features, bias=True)
+        self.weights_out = nn.Linear(hidden_features, hidden_size, bias=True)
 
     def forward(self, hidden_state):
         hidden_state = self.weights_in(hidden_state)

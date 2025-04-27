@@ -117,9 +117,8 @@ def predict(input_files, output_dir):
     input_filenames = todos.data.load_files(input_files)
 
     # start predict
-    progress_bar = tqdm(total=len(input_filenames))
     for filename in input_filenames:
-        progress_bar.update(1)
+        print(f"Create mesh from {filename} ...")
 
         input_tensor = todos.data.load_rgba_tensor(filename)
         input_image, input_mask = image_center(input_tensor)

@@ -156,11 +156,7 @@ class DoubleModulation(nn.Module):
         return out[0], out[1], out[2], out[3], out[4], out[5] # shift, scale, gate; shift, scale2, gate2
 
 class DoubleStreamBlock(nn.Module):
-    def __init__(self,
-        hidden_size,
-        num_heads,
-        mlp_ratio,
-    ):
+    def __init__(self, hidden_size, num_heads, mlp_ratio):
         super().__init__()
         assert hidden_size == 1024
         assert num_heads == 16
@@ -311,16 +307,14 @@ class Hunyuan3DDiT(nn.Module):
         qkv_bias: true
         guidance_embed: false    
     """
-
-    def __init__(
-        self,
+    def __init__(self,
         in_channels=64,
         context_in_dim=1536,
         hidden_size=1024,
         mlp_ratio=4.0,
         num_heads=16,
-        depth=8,  # 16
-        depth_single_blocks=16,  # 32
+        depth=8,
+        depth_single_blocks=16,
         time_factor=1000,
     ):
         super().__init__()
@@ -329,11 +323,9 @@ class Hunyuan3DDiT(nn.Module):
         self.time_in = MLPEmbedder(in_dim=256, hidden_dim=hidden_size)
         self.cond_in = nn.Linear(context_in_dim, hidden_size)
 
-        # len(self.double_blocks) === 8
         self.double_blocks = nn.ModuleList(
-            [DoubleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)]  # 8 ?
+            [DoubleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)]
         )
-
         self.single_blocks = nn.ModuleList(
             [SingleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth_single_blocks)]
         )
@@ -342,8 +334,6 @@ class Hunyuan3DDiT(nn.Module):
         self.load_weights()
 
     def forward(self, x, t, cond):
-        # todos.debug.output_var("x, t, cond", (x, t, cond))
-
         # tensor [x] size: [2, 512, 64], min: -4.179688, max: 4.238281, mean: 0.005243
         # tensor [t] size: [2], min: 0.0, max: 0.0, mean: 0.0
         # tensor [cond] size: [2, 1370, 1536], min: -15.28125, max: 14.375, mean: -0.009306
