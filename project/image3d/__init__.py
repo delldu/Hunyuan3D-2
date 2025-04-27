@@ -15,9 +15,12 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 
-import todos
+import numpy as np
+from skimage import measure
+import trimesh
 from . import shape
 
+import todos
 import pdb
 
 def image_center(image, border_ratio = 0.15):
@@ -50,6 +53,26 @@ def image_center(image, border_ratio = 0.15):
 
     return pad_image
 
+def create_mesh(grid_logit):
+    '''Create mesh from grid logit'''
+
+    mesh_v, mesh_f, normals, _ = measure.marching_cubes(
+        grid_logit.cpu().numpy(),
+        0.0, # mc_level
+        method="lewiner"
+    )
+    # array [mesh_v] shape: (327988, 3), min: 1.8486219644546509, max: 382.1461181640625, mean: 184.00257873535156
+    # array [mesh_f] shape: (655980, 3), min: 0, max: 327987, mean: 163994.911803
+    # array [normals] shape: (327988, 3), min: -1.0, max: 1.0, mean: 0.005313000176101923
+    grid_size = [385, 385, 385]
+    bbox_min = np.array([-1.01, -1.01, -1.01])
+    bbox_size = np.array([2.02,  2.02,  2.02])
+    mesh_v = mesh_v / grid_size * bbox_size + bbox_min
+
+    mesh_f = mesh_f[:, ::-1] # !!!! [0, 1, 2] ==> [2, 1, 0] !!!
+    mesh = trimesh.Trimesh(mesh_v, mesh_f)
+    # mesh ...
+    return mesh # mesh.export("xxxx.glb")
 
 def get_shape_model():
     """Create model."""
@@ -84,10 +107,8 @@ def get_shape_model():
 def predict(input_files, output_dir):
     # Create directory to store result
     todos.data.mkdir(output_dir)
-    # load model
-    model, device = get_shape_model()
-    # print(model)
 
+    model, device = get_shape_model()
     # load files
     input_filenames = todos.data.load_files(input_files)
 
@@ -102,13 +123,12 @@ def predict(input_files, output_dir):
 
         # model = model.half()
         with torch.no_grad():
-            output_mesh = model(input_tensor)
+            grid_logits = model(input_tensor)
 
         # output_file = f"{output_dir}/{os.path.basename(filename)}"
-
         obj_filename = os.path.basename(filename)
         obj_filename = obj_filename.replace(".jpg", ".obj")
         obj_filename = obj_filename.replace(".png", ".obj")
         output_file = f"{output_dir}/{obj_filename}"
-
+        output_mesh = create_mesh(grid_logits[0])
         output_mesh.export(output_file)

@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-# from .attention_processors import CrossAttentionProcessor
 import todos
 import pdb
 
@@ -38,7 +37,6 @@ class QKVMultiheadCrossAttention(nn.Module):
         self.heads = heads
         self.q_norm = nn.LayerNorm(width // heads, elementwise_affine=True, eps=1e-6)
         self.k_norm = nn.LayerNorm(width // heads, elementwise_affine=True, eps=1e-6)
-        # self.attn_processor = CrossAttentionProcessor()
 
     def forward(self, q, kv):
         # tensor [q] size: [1, 8000, 1024], min: -8.914062, max: 8.632812, mean: -0.044021
@@ -158,8 +156,7 @@ class ResidualAttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(
-        self,
+    def __init__(self,
         n_ctx = 512,
         width = 1024,
         layers = 16,

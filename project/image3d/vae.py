@@ -2,9 +2,6 @@ import os
 import torch
 import torch.nn as nn
 from .attn import FourierEmbedder, Transformer, CrossAttentionDecoder
-import numpy as np
-from skimage import measure
-import trimesh
 from tqdm import tqdm
 from einops import repeat
 
@@ -22,28 +19,6 @@ def dense_grid(res, box_m=1.01):
     xyz_grid = torch.stack((xs, ys, zs), dim = -1)
 
     return xyz_grid # size() -- [385, 385, 385, 3]
-
-
-def create_mesh(grid_logit):
-    '''Create mesh from grid logit'''
-
-    mesh_v, mesh_f, normals, _ = measure.marching_cubes(
-        grid_logit.cpu().numpy(),
-        0.0, # mc_level
-        method="lewiner"
-    )
-    # array [mesh_v] shape: (327988, 3), min: 1.8486219644546509, max: 382.1461181640625, mean: 184.00257873535156
-    # array [mesh_f] shape: (655980, 3), min: 0, max: 327987, mean: 163994.911803
-    # array [normals] shape: (327988, 3), min: -1.0, max: 1.0, mean: 0.005313000176101923
-    grid_size = [385, 385, 385]
-    bbox_min = np.array([-1.01, -1.01, -1.01])
-    bbox_size = np.array([2.02,  2.02,  2.02])
-    mesh_v = mesh_v / grid_size * bbox_size + bbox_min
-
-    mesh_f = mesh_f[:, ::-1] # !!!! [0, 1, 2] ==> [2, 1, 0] !!!
-    mesh = trimesh.Trimesh(mesh_v, mesh_f)
-    # mesh ...
-    return mesh # mesh.export("xxxx.glb")
 
 class ShapeVAE(nn.Module):
     """
@@ -117,7 +92,7 @@ class ShapeVAE(nn.Module):
         grid_logits = grid_logits.view((batch_size, grid_res + 1, grid_res + 1, grid_res + 1)).float()
         # 385*385*385 === 57066625
         # tensor [grid_logits] size: [1, 385, 385, 385], min: -1.082031, max: 1.067383, mean: -0.787309
-        return create_mesh(grid_logits[0])
+        return grid_logits
 
 
     def load_weights(self, model_path="models/image3d_shapevae.pth"):
