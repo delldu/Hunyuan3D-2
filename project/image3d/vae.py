@@ -5,8 +5,6 @@ from .attn import FourierEmbedder, Transformer, CrossAttentionDecoder
 from tqdm import tqdm
 from einops import repeat
 
-# from .surface_extractors import MCSurfaceExtractor
-# from .volume_decoders import VanillaVolumeDecoder
 import todos
 import pdb
 
@@ -38,8 +36,7 @@ class ShapeVAE(nn.Module):
       geo_decoder_downsample_ratio: 1
       geo_decoder_ln_post: true
     """
-    def __init__(
-        self,
+    def __init__(self,
         num_latents = 512,
         embed_dim = 64,
         width = 1024,
@@ -51,9 +48,7 @@ class ShapeVAE(nn.Module):
         self.post_kl = nn.Linear(embed_dim, width)
         # self.post_kl -- Linear(in_features=64, out_features=1024, bias=True)
 
-        self.transformer = Transformer(
-            n_ctx=num_latents, width=width, layers=num_decoder_layers, heads=heads
-        )
+        self.transformer = Transformer(n_ctx=num_latents, width=width, layers=num_decoder_layers, heads=heads)
         self.geo_decoder = CrossAttentionDecoder(
             out_channels=1, num_latents=num_latents, mlp_expand_ratio=4, width=width, heads=heads
         )
@@ -84,7 +79,7 @@ class ShapeVAE(nn.Module):
             chunk_queries = xyz_samples[start: start + num_chunks, :]
             chunk_queries = repeat(chunk_queries, "p c -> b p c", b=batch_size)
             logits = self.geo_decoder(queries=chunk_queries, latents=latents)
-            batch_logits.append(logits)  # ggml_cat xxxx_????
+            batch_logits.append(logits)
         # len(batch_logits) -- 7134
         # batch_logits[0].size() -- [1, 8000, 1]
         grid_logits = torch.cat(batch_logits, dim=1) # torch.cat(batch_logits, dim=1).size() -- [1, 57066625, 1]

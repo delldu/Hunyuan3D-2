@@ -203,7 +203,6 @@ class Dinov2SwiGLUFFN(nn.Module):
         hidden = nn.functional.silu(x1) * x2
         return self.weights_out(hidden)
 
-
 # -----------------------------------
 class Dinov2Layer(nn.Module):
     def __init__(self, hidden_size=1536):

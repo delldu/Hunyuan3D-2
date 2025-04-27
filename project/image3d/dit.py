@@ -16,7 +16,7 @@ def attention(q, k, v):
     return x
 
 
-def timestep_embedding(t, dim=256, max_period=10000, time_factor: float = 1000.0):
+def timestep_embedding(t, dim=256, max_period=10000, time_factor=1000.0):
     assert time_factor == 1000
 
     t = time_factor * t
@@ -120,9 +120,7 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         # !!!!!!!!!!!!!!! useless, place holder ...
-
         # qkv = self.qkv(x)
-
         # todos.debug.output_var("qkv", qkv)
         # q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
         # todos.debug.output_var("q, k, v", (q, k, v))
@@ -134,7 +132,7 @@ class SelfAttention(nn.Module):
 
 
 class SingleModulation(nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim):
         super().__init__()
         self.multiplier = 3
         self.lin = nn.Linear(dim, self.multiplier * dim, bias=True)
@@ -146,7 +144,7 @@ class SingleModulation(nn.Module):
 
 
 class DoubleModulation(nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim):
         super().__init__()
         self.multiplier = 6
         self.lin = nn.Linear(dim, self.multiplier * dim, bias=True)
@@ -158,11 +156,10 @@ class DoubleModulation(nn.Module):
         return out[0], out[1], out[2], out[3], out[4], out[5] # shift, scale, gate; shift, scale2, gate2
 
 class DoubleStreamBlock(nn.Module):
-    def __init__(
-        self,
-        hidden_size: int,
-        num_heads: int,
-        mlp_ratio: float,
+    def __init__(self,
+        hidden_size,
+        num_heads,
+        mlp_ratio,
     ):
         super().__init__()
         assert hidden_size == 1024
@@ -244,7 +241,7 @@ class SingleStreamBlock(nn.Module):
     A DiT block with parallel linear layers as described in
     https://arxiv.org/abs/2302.05442 and adapted modulation interface.
     """
-    def __init__(self, hidden_size: int, num_heads: int, mlp_ratio: float = 4.0):
+    def __init__(self, hidden_size, num_heads, mlp_ratio = 4.0):
         super().__init__()
 
         self.hidden_dim = hidden_size
@@ -285,7 +282,7 @@ class SingleStreamBlock(nn.Module):
 
 
 class LastLayer(nn.Module):
-    def __init__(self, hidden_size: int, patch_size: int, out_channels: int):
+    def __init__(self, hidden_size, patch_size, out_channels):
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)

@@ -43,15 +43,13 @@ class ShapeGenerator(nn.Module):
 
         self.dinov2_model.to(self.device)
         dinov2_output = self.dinov2_model(image)
-        self.dinov2_model.cpu()
-
         # todos.debug.output_var("dinov2_output", dinov2_output)
+        self.dinov2_model.cpu()
 
         dit_condition = torch.cat((dinov2_output, torch.zeros_like(dinov2_output)), dim = 0)
         # tensor [dit_condition] size: [2, 1370, 1536], min: -16.389088, max: 15.987875, mean: -0.009674
         
         latents = torch.randn(1, 512, 64).to(image.device)
-        # todos.debug.output_var("latents", latents)
 
         num_inference_steps = 50
         step_scale = 1.0/(num_inference_steps - 1.0)
@@ -78,10 +76,8 @@ class ShapeGenerator(nn.Module):
 
         self.dit_model.cpu()
 
-        # todos.debug.output_var("latents", latents)
-
         self.vae_model.to(self.device)
         grid_logits = self.vae_model(latents)
         self.vae_model.cpu()
 
-        return grid_logits
+        return grid_logits # [1, 385, 385, 385]

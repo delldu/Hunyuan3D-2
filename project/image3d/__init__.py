@@ -76,124 +76,6 @@ def create_mesh(grid_logit):
     # mesh ...
     return mesh # mesh.export("xxxx.glb")
 
-import cv2
-from PIL import Image
-from einops import repeat, rearrange
-
-def array_to_tensor(np_array):
-    image_pt = torch.tensor(np_array).float()
-    image_pt = image_pt / 255 * 2 - 1
-
-    # tensor [image_pt] size: [512, 512, 3], min: -1.0, max: 1.0, mean: 0.68679
-    image_pt = rearrange(image_pt, "h w c -> c h w")
-    # tensor [image_pt] size: [3, 512, 512], min: -1.0, max: 1.0, mean: 0.68679
-
-    image_pts = repeat(image_pt, "c h w -> b c h w", b=1)
-    return image_pts
-
-class ImageProcessorV2:
-    def __init__(self, size=512, border_ratio=0.15):
-        self.size = size
-        self.border_ratio = border_ratio
-
-    @staticmethod
-    def recenter(image, border_ratio: float = 0.15):
-        """ recenter an image to leave some empty space at the image border.
-        """
-        # array [image] shape: (500, 500, 4), min: 0, max: 255, mean: 62.681185
-        if image.shape[-1] == 4: # True
-            mask = image[..., 3]
-        else:
-            mask = np.ones_like(image[..., 0:1]) * 255
-            image = np.concatenate([image, mask], axis=-1)
-            mask = mask[..., 0]
-
-
-        H, W, C = image.shape
-
-        size = max(H, W)
-        result = np.zeros((size, size, C), dtype=np.uint8)
-
-        coords = np.nonzero(mask)
-        # (Pdb) coords -- (array([ 24,  24,  24, ..., 469, 469, 469]), array([130, 131, 132, ..., 310, 311, 312]))
-
-        x_min, x_max = coords[0].min(), coords[0].max()
-        y_min, y_max = coords[1].min(), coords[1].max()
-        h = x_max - x_min
-        w = y_max - y_min
-        if h == 0 or w == 0:
-            raise ValueError('input image is empty')
-        desired_size = int(size * (1 - border_ratio)) # desired_size
-        scale = desired_size / max(h, w) # 0.9550561797752809
-        h2 = int(h * scale)
-        w2 = int(w * scale)
-
-        x2_min = (size - h2) // 2
-        x2_max = x2_min + h2
-        y2_min = (size - w2) // 2
-        y2_max = y2_min + w2
-
-        # x_min,x_max, y_min,y_max -- 24, 469, 108, 389
-
-        #  x2_min,x2_max -- (37, 462), y2_min,y2_max -- (116, 384)
-        result[x2_min:x2_max, y2_min:y2_max] = cv2.resize(image[x_min:x_max, y_min:y_max], (w2, h2),
-                                                          interpolation=cv2.INTER_AREA)
-
-        # array [result] shape: (500, 500, 4), min: 0, max: 255, mean: 57.086336
-        bg = np.ones((result.shape[0], result.shape[1], 3), dtype=np.uint8) * 255
-
-        mask = result[..., 3:].astype(np.float32) / 255
-        result = result[..., :3] * mask + bg * (1 - mask)
-
-        mask = mask * 255
-        result = result.clip(0, 255).astype(np.uint8)
-        mask = mask.clip(0, 255).astype(np.uint8)
-
-        return result, mask
-
-    def load_image(self, image, border_ratio=0.15, to_tensor=True):
-        # image --- PIL.Image.Image
-        # border_ratio = 0.15
-        # to_tensor = True
-
-        if isinstance(image, str):
-            image = cv2.imread(image, cv2.IMREAD_UNCHANGED)
-            image, mask = self.recenter(image, border_ratio=border_ratio)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        elif isinstance(image, Image.Image): # True
-            image = image.convert("RGBA")
-            image = np.asarray(image)
-            image, mask = self.recenter(image, border_ratio=border_ratio)
-
-        # self.size == 512
-        image = cv2.resize(image, (self.size, self.size), interpolation=cv2.INTER_CUBIC)
-        mask = cv2.resize(mask, (self.size, self.size), interpolation=cv2.INTER_NEAREST)
-        mask = mask[..., np.newaxis]
-
-        if to_tensor: # True
-            image = array_to_tensor(image)
-            mask = array_to_tensor(mask)
-
-        # tensor [image] size: [1, 3, 512, 512], min: -1.0, max: 1.0, mean: 0.68679
-        # tensor [mask] size: [1, 1, 512, 512], min: -1.0, max: 1.0, mean: -0.32582
-        return image, mask
-
-    def __call__(self, image, border_ratio=0.15, to_tensor=True, **kwargs):
-        # border_ratio = 0.15
-        # to_tensor = True
-        # kwargs = {}
-        if self.border_ratio is not None: # self.border_ratio == 0.15
-            border_ratio = self.border_ratio
-        image, mask = self.load_image(image, border_ratio=border_ratio, to_tensor=to_tensor)
-        outputs = {
-            'image': image,
-            'mask': mask
-        }
-        # outputs is dict:
-        #     tensor [image] size: [1, 3, 512, 512], min: -1.0, max: 1.0, mean: 0.68679
-        #     tensor [mask] size: [1, 1, 512, 512], min: -1.0, max: 1.0, mean: -0.32582
-        return outputs
-
 
 def get_shape_model():
     """Create model."""
@@ -230,10 +112,9 @@ def predict(input_files, output_dir):
     todos.data.mkdir(output_dir)
 
     model, device = get_shape_model()
+
     # load files
     input_filenames = todos.data.load_files(input_files)
-
-    image_process = ImageProcessorV2()
 
     # start predict
     progress_bar = tqdm(total=len(input_filenames))
@@ -243,10 +124,6 @@ def predict(input_files, output_dir):
         input_tensor = todos.data.load_rgba_tensor(filename)
         input_image, input_mask = image_center(input_tensor)
         input_image = input_image.to(device)
-
-        # image = Image.open(filename).convert("RGBA")
-        # input_tensor = image_process(image).pop("image").to(device)
-        # input_tensor = (input_tensor + 1.0)/2.0
 
         # model = model.half()
         with torch.no_grad():
