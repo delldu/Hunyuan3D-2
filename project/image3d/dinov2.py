@@ -25,40 +25,40 @@ class Dinov2Embeddings(nn.Module):
         #   (dropout): Dropout(p=0.0, inplace=False)
         # )
 
-    def interpolate_pos_encoding(self, embeddings, height: int, width: int):
-        num_patches = embeddings.shape[1] - 1
-        num_positions = self.position_embeddings.shape[1] - 1  # 1369
+    # def interpolate_pos_encoding(self, embeddings, height: int, width: int):
+    #     num_patches = embeddings.shape[1] - 1
+    #     num_positions = self.position_embeddings.shape[1] - 1  # 1369
 
-        # always interpolate when tracing to ensure the exported model works for dynamic input shapes
-        if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
-            return self.position_embeddings
+    #     # always interpolate when tracing to ensure the exported model works for dynamic input shapes
+    #     if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
+    #         return self.position_embeddings
 
-        pdb.set_trace()
-        class_pos_embed = self.position_embeddings[:, :1]
-        patch_pos_embed = self.position_embeddings[:, 1:]
+    #     pdb.set_trace()
+    #     class_pos_embed = self.position_embeddings[:, :1]
+    #     patch_pos_embed = self.position_embeddings[:, 1:]
 
-        dim = embeddings.shape[-1]
+    #     dim = embeddings.shape[-1]
 
-        new_height = height // self.patch_size
-        new_width = width // self.patch_size
+    #     new_height = height // self.patch_size
+    #     new_width = width // self.patch_size
 
-        sqrt_num_positions = int(num_positions ** 0.5)
+    #     sqrt_num_positions = int(num_positions ** 0.5)
 
-        patch_pos_embed = patch_pos_embed.reshape(1, sqrt_num_positions, sqrt_num_positions, dim)
-        todos.debug.output_var("patch_pos_embed 1", patch_pos_embed)
-        patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
-        todos.debug.output_var("patch_pos_embed 2", patch_pos_embed)
+    #     patch_pos_embed = patch_pos_embed.reshape(1, sqrt_num_positions, sqrt_num_positions, dim)
+    #     todos.debug.output_var("patch_pos_embed 1", patch_pos_embed)
+    #     patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
+    #     todos.debug.output_var("patch_pos_embed 2", patch_pos_embed)
 
-        patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.to(torch.float32), size=(new_height, new_width), mode="bicubic", align_corners=False
-        ).to(dtype=patch_pos_embed.dtype)
+    #     patch_pos_embed = nn.functional.interpolate(
+    #         patch_pos_embed.to(torch.float32), size=(new_height, new_width), mode="bilinear", align_corners=True
+    #     ).to(dtype=patch_pos_embed.dtype)
 
-        todos.debug.output_var("patch_pos_embed 3", patch_pos_embed)
-        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        todos.debug.output_var("patch_pos_embed 4", patch_pos_embed)
+    #     todos.debug.output_var("patch_pos_embed 3", patch_pos_embed)
+    #     patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+    #     todos.debug.output_var("patch_pos_embed 4", patch_pos_embed)
 
-        pdb.set_trace()
-        return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
+    #     pdb.set_trace()
+    #     return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
 
     def forward(self, pixel_values):
         B, C, H, W = pixel_values.size()  # size() -- [1, 3, 518, 518]
@@ -70,7 +70,7 @@ class Dinov2Embeddings(nn.Module):
         embeddings = torch.cat((cls_tokens, embeddings), dim=1)
 
         # add positional encoding to each token
-        embeddings = embeddings + self.interpolate_pos_encoding(embeddings, H, W)
+        embeddings = embeddings +  self.position_embeddings # self.interpolate_pos_encoding(embeddings, H, W)
         return embeddings
 
 # ----------------------------------------

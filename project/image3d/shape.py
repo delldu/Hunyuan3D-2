@@ -26,7 +26,7 @@ def image_transform(image):
     )
     return T(image)
 
-class Generator(nn.Module):
+class ShapeGenerator(nn.Module):
     def __init__(self, device):
         super().__init__()
         self.device = device
@@ -34,9 +34,23 @@ class Generator(nn.Module):
         self.dit_model = Hunyuan3DDiT()
         self.vae_model = ShapeVAE()
 
-
     def forward(self, image):
+        image = F.interpolate(image, size=(512, 512), mode="bilinear", align_corners=True)
+
+        todos.debug.output_var("image 1", image)
+        # tensor [image] size: [1, 3, 512, 512], min: 0.0, max: 1.0, mean: 0.195049
         image = image_transform(image)
+        todos.debug.output_var("image 2", image)
+        # tensor [image] size: [1, 3, 518, 518], min: -2.521169, max: 2.666323, mean: -1.123063
+
+        pdb.set_trace()
+        # tensor [image] size: [1, 3, 512, 512], min: 0.0, max: 1.0, mean: 0.8434
+        # tensor [inputs] size: [1, 3, 518, 518], min: -2.119141, max: 2.638672, mean: 1.745283
+
+        # Bad ...
+        # tensor [image 1] size: [1, 3, 512, 512], min: 0.0, max: 1.0, mean: 0.843395
+        # tensor [image 2] size: [1, 3, 518, 518], min: -2.117904, max: 2.64, mean: 1.745994
+
 
         self.dinov2_model.to(self.device)
         dinov2_output = self.dinov2_model(image)
@@ -45,8 +59,10 @@ class Generator(nn.Module):
         # todos.debug.output_var("dinov2_output", dinov2_output)
 
         dit_condition = torch.cat((dinov2_output, torch.zeros_like(dinov2_output)), dim = 0)
-        # todos.debug.output_var("dit_condition", dit_condition)
-
+        todos.debug.output_var("dit_condition", dit_condition)
+        # tensor [dit_condition] size: [2, 1370, 1536], min: -16.389088, max: 15.987875, mean: -0.009674
+        # pdb.set_trace()
+        
         latents = torch.randn(1, 512, 64).to(image.device)
         # todos.debug.output_var("latents", latents)
 
