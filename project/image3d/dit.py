@@ -290,7 +290,6 @@ class LastLayer(nn.Module):
         x = self.linear(x)
         return x
 
-
 class Hunyuan3DDiT(nn.Module):
     """
       target: hy3dgen.shapegen.models.Hunyuan3DDiT
