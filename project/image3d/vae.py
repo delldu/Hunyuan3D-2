@@ -66,14 +66,12 @@ class DownEncoderBlock2D(nn.Module):
         in_channels: int,
         out_channels: int,
         num_layers: int = 1,
-        resnet_groups: int = 32,
         add_downsample: bool = True,
     ):
         super().__init__()
         # assert in_channels == 128 or ...
         # assert out_channels == 128 or ...
         assert num_layers == 2
-        assert resnet_groups == 32
         # assert add_downsample == True or ...
 
         resnets = []
@@ -118,19 +116,17 @@ class Attention(nn.Module):
         heads: int = 1,
         dim_head: int = 512,
         bias: bool = True,
-        norm_num_groups = 32,
     ):
         super().__init__()
         assert query_dim == 512
         assert heads == 1
         assert dim_head == 512
         assert bias == True
-        assert norm_num_groups == 32
 
         self.heads = heads
         self.scale = dim_head**-0.5
 
-        self.group_norm = nn.GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, eps=1e-6, affine=True)
+        self.group_norm = nn.GroupNorm(num_channels=query_dim, num_groups=32, eps=1e-6, affine=True)
         self.to_q = nn.Linear(query_dim, dim_head * heads, bias=bias)
 
         # only relevant for the `AddedKVProcessor` classes
@@ -182,18 +178,14 @@ class Attention(nn.Module):
 # -----------------------------------------------------------------------------
 class UNetMidBlock2D(nn.Module):
     def __init__(self,
-        in_channels: int,
-        num_layers: int = 1,
-        resnet_groups: int = 32,
-        attention_head_dim: int = 512,
+        in_channels = 512,
+        num_layers = 1,
+        attention_head_dim = 512,
     ):
         super().__init__()
         assert in_channels == 512
         assert num_layers == 1
-        assert resnet_groups == 32
         assert attention_head_dim == 512
-
-        resnet_groups = resnet_groups if resnet_groups is not None else min(in_channels // 4, 32)
 
         # there is always at least one resnet
         resnets = [
@@ -209,7 +201,6 @@ class UNetMidBlock2D(nn.Module):
                     in_channels,
                     heads=in_channels // attention_head_dim,
                     dim_head=attention_head_dim,
-                    norm_num_groups=resnet_groups,
                     bias=True,
                 )
             )
@@ -229,6 +220,7 @@ class UNetMidBlock2D(nn.Module):
     def forward(self, hidden_states):
         hidden_states = self.resnets[0](hidden_states)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
+            pdb.set_trace()
             hidden_states = attn(hidden_states)
             hidden_states = resnet(hidden_states)
 
@@ -240,32 +232,21 @@ class UpDecoderBlock2D(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        num_layers: int = 1,
-        resnet_groups: int = 32,
-        add_upsample: bool = True,
+        num_layers = 3,
+        add_upsample = True,
     ):
         super().__init__()
-        # assert num_layers == 1 or ...
-        assert resnet_groups == 32
+        assert num_layers == 3
+        # assert add_upsample == True or ...
 
         resnets = []
-
         for i in range(num_layers):
             input_channels = in_channels if i == 0 else out_channels
-            resnets.append(
-                ResnetBlock2D(
-                    in_channels=input_channels,
-                    out_channels=out_channels,
-                )
-            )
-
+            resnets.append(ResnetBlock2D(in_channels=input_channels, out_channels=out_channels))
         self.resnets = nn.ModuleList(resnets)
 
         if add_upsample:
-            self.upsamplers = nn.ModuleList([Upsample2D(
-                out_channels, 
-                # use_conv=True, out_channels=out_channels,
-            )])
+            self.upsamplers = nn.ModuleList([Upsample2D(out_channels)])
         else:
             self.upsamplers = None
 
@@ -279,17 +260,12 @@ class UpDecoderBlock2D(nn.Module):
 
         return hidden_states
 
-
-
-# !!! -----------------------------------------------------------------------------
 def nonlinearity(x):
     return x * torch.sigmoid(x)  # nonlinearity, F.silu
 
-# !!! -----------------------------------------------------------------------------
 def Normalize(in_channels, num_groups=32):
     return nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
 
-# !!! -----------------------------------------------------------------------------
 class Downsample2D(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -301,7 +277,6 @@ class Downsample2D(nn.Module):
         x = self.conv(x)
         return x
 
-# !!! -----------------------------------------------------------------------------
 class Upsample2D(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -312,8 +287,6 @@ class Upsample2D(nn.Module):
         x = self.conv(x)
         return x
 
-
-# !!! -----------------------------------------------------------------------------
 class ResnetBlock2D(nn.Module):
     def __init__(self, in_channels, out_channels=None):
         super().__init__()
@@ -358,13 +331,11 @@ class Encoder(nn.Module):
         down_block_types = ['DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D'],
         block_out_channels = [128, 256, 512, 512],
         layers_per_block = 2,
-        norm_num_groups = 32,
     ):
         super().__init__()
         assert in_channels == 3
         assert out_channels == 4
         assert layers_per_block == 2
-        assert norm_num_groups == 32
 
         self.conv_in = nn.Conv2d(
             in_channels,
@@ -387,7 +358,6 @@ class Encoder(nn.Module):
                 in_channels=input_channel,
                 out_channels=output_channel,
                 add_downsample=not is_final_block,
-                resnet_groups=norm_num_groups,
             )
             self.down_blocks.append(down_block)
 
@@ -395,11 +365,10 @@ class Encoder(nn.Module):
         self.mid_block = UNetMidBlock2D(
             in_channels=block_out_channels[-1],
             attention_head_dim=block_out_channels[-1],
-            resnet_groups=norm_num_groups,
         )
 
         # out
-        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1], num_groups=norm_num_groups, eps=1e-6)
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1], num_groups=32, eps=1e-6)
         self.conv_act = nn.SiLU()
 
         conv_out_channels = 2 * out_channels # 8
@@ -432,13 +401,11 @@ class Decoder(nn.Module):
         up_block_types = ['UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D'],
         block_out_channels = [128, 256, 512, 512],
         layers_per_block = 2,
-        norm_num_groups = 32,
     ):
         super().__init__()
         assert in_channels == 4
         assert out_channels == 3
         assert layers_per_block == 2
-        assert norm_num_groups == 32
 
         self.conv_in = nn.Conv2d(
             in_channels,
@@ -454,7 +421,6 @@ class Decoder(nn.Module):
         self.mid_block = UNetMidBlock2D(
             in_channels=block_out_channels[-1],
             attention_head_dim=block_out_channels[-1],
-            resnet_groups=norm_num_groups,
         )
 
         # up
@@ -470,17 +436,15 @@ class Decoder(nn.Module):
                 in_channels=prev_output_channel,
                 out_channels=output_channel,
                 add_upsample=not is_final_block,
-                resnet_groups=norm_num_groups,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
 
         # out
-        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=norm_num_groups, eps=1e-6)
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=32, eps=1e-6)
         self.conv_act = nn.SiLU()
         self.conv_out = nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1)
 
-        # pdb.set_trace()
 
     def forward(self, sample):
         sample = self.conv_in(sample)
