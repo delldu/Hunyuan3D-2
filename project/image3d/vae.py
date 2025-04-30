@@ -17,17 +17,12 @@ import todos
 # import ggml_engine
 import pdb
 
-
-# !!! -----------------------------------------------------------------------------
 class AutoencoderKL(nn.Module):
     def __init__(self, latent_channels = 4):
         super().__init__()
         self.scaling_factor = 0.18215
-
-        # pass init params to Encoder
         self.encoder = Encoder()
         self.decoder = Decoder()
-
         self.quant_conv = nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1)
         self.post_quant_conv = nn.Conv2d(latent_channels, latent_channels, 1)
         self.load_weights()
@@ -41,7 +36,6 @@ class AutoencoderKL(nn.Module):
         meanvar, logvar = torch.chunk(moments, 2, dim=1)
         # meanvar.size() -- [1, 4, 128, 128]
         # logvar.size()  -- [1, 4, 128, 128]
-
         logvar = torch.clamp(logvar, -30.0, 20.0)
         stdvar = torch.exp(0.5 * logvar)
         output = meanvar + stdvar * torch.randn(meanvar.shape).to(device=x.device)
@@ -57,7 +51,6 @@ class AutoencoderKL(nn.Module):
 
     def forward(self, x):
         # uselesss, placeholder ...
-
         z = self.encode(x)
         return self.decode(z)
 
@@ -67,24 +60,21 @@ class AutoencoderKL(nn.Module):
         print(f"Loading {checkpoint} ...")
         self.load_state_dict(torch.load(checkpoint), strict=True)
 
-# -----------------------------------------------------------------------------
 class DownEncoderBlock2D(nn.Module):
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         num_layers: int = 1,
-        resnet_eps: float = 1e-6,
         resnet_groups: int = 32,
         add_downsample: bool = True,
     ):
         super().__init__()
-        # in_channels = 128
-        # out_channels = 128
-        # num_layers = 2
-        # resnet_eps = 1e-06
-        # resnet_groups = 32
-        # add_downsample = True
+        # assert in_channels == 128 or ...
+        # assert out_channels == 128 or ...
+        assert num_layers == 2
+        assert resnet_groups == 32
+        # assert add_downsample == True or ...
 
         resnets = []
         for i in range(num_layers):
@@ -120,7 +110,6 @@ class Attention(nn.Module):
         in_channels,
         heads=in_channels // attention_head_dim,
         dim_head=attention_head_dim,
-        eps=resnet_eps,
         bias=True,
     """
 
@@ -130,19 +119,18 @@ class Attention(nn.Module):
         dim_head: int = 512,
         bias: bool = True,
         norm_num_groups = 32,
-        eps: float = 1e-6,
     ):
         super().__init__()
-        # query_dim = 512
-        # heads = 1
-        # dim_head = 512
-        # bias = True
-        # norm_num_groups = 32
-        # eps = 1e-06
+        assert query_dim == 512
+        assert heads == 1
+        assert dim_head == 512
+        assert bias == True
+        assert norm_num_groups == 32
+
         self.heads = heads
         self.scale = dim_head**-0.5
 
-        self.group_norm = nn.GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, eps=eps, affine=True)
+        self.group_norm = nn.GroupNorm(num_channels=query_dim, num_groups=norm_num_groups, eps=1e-6, affine=True)
         self.to_q = nn.Linear(query_dim, dim_head * heads, bias=bias)
 
         # only relevant for the `AddedKVProcessor` classes
@@ -153,21 +141,15 @@ class Attention(nn.Module):
         self.to_out.append(nn.Linear(dim_head * heads, query_dim, bias=True))
         self.to_out.append(nn.Dropout(0.0))
 
-    def forward(self,
-        # attn,
-        hidden_states,
-        # temb = None,
-    ):
+    def forward(self, hidden_states):
         residual = hidden_states
-        input_ndim = hidden_states.ndim # 4
 
+        assert hidden_states.ndim == 4
+
+        # input_ndim = hidden_states.ndim # 4
         # if input_ndim == 4:
-        batch_size, channel, height, width = hidden_states.shape
-        hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
-
-        batch_size, sequence_length, _ = hidden_states.shape
-
-
+        B, C, H, W = hidden_states.shape
+        hidden_states = hidden_states.view(B, C, H * W).transpose(1, 2)
         hidden_states = self.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
         query = self.to_q(hidden_states)
@@ -175,15 +157,15 @@ class Attention(nn.Module):
         value = self.to_v(hidden_states)
 
         head_dim = key.shape[-1] // self.heads
-        query = query.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
-        key = key.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
-        value = value.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
+        query = query.view(B, -1, self.heads, head_dim).transpose(1, 2)
+        key = key.view(B, -1, self.heads, head_dim).transpose(1, 2)
+        value = value.view(B, -1, self.heads, head_dim).transpose(1, 2)
 
         hidden_states = F.scaled_dot_product_attention(
             query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False
         )
 
-        hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, self.heads * head_dim)
+        hidden_states = hidden_states.transpose(1, 2).reshape(B, -1, self.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
 
         # linear proj
@@ -192,35 +174,26 @@ class Attention(nn.Module):
         hidden_states = self.to_out[1](hidden_states)
 
         # if input_ndim == 4:
-        hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
-
+        hidden_states = hidden_states.transpose(-1, -2).reshape(B, C, H, W)
         hidden_states = hidden_states + residual
-
-        # hidden_states = hidden_states / self.rescale_output_factor # self.rescale_output_factor === 1
 
         return hidden_states
 
 # -----------------------------------------------------------------------------
 class UNetMidBlock2D(nn.Module):
-    def __init__(
-        self,
+    def __init__(self,
         in_channels: int,
         num_layers: int = 1,
-        resnet_eps: float = 1e-6,
         resnet_groups: int = 32,
-        add_attention: bool = True,
-        attention_head_dim: int = 1,
+        attention_head_dim: int = 512,
     ):
         super().__init__()
         assert in_channels == 512
         assert num_layers == 1
-        assert resnet_eps == 1e-06
         assert resnet_groups == 32
-        assert add_attention == True
         assert attention_head_dim == 512
 
         resnet_groups = resnet_groups if resnet_groups is not None else min(in_channels // 4, 32)
-        self.add_attention = add_attention
 
         # there is always at least one resnet
         resnets = [
@@ -236,7 +209,6 @@ class UNetMidBlock2D(nn.Module):
                     in_channels,
                     heads=in_channels // attention_head_dim,
                     dim_head=attention_head_dim,
-                    eps=resnet_eps,
                     norm_num_groups=resnet_groups,
                     bias=True,
                 )
@@ -254,10 +226,9 @@ class UNetMidBlock2D(nn.Module):
 
         # pdb.set_trace()
 
-    def forward(self, hidden_states, temb = None):
+    def forward(self, hidden_states):
         hidden_states = self.resnets[0](hidden_states)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
-            # hidden_states = attn(hidden_states, temb=temb)
             hidden_states = attn(hidden_states)
             hidden_states = resnet(hidden_states)
 
@@ -269,13 +240,14 @@ class UpDecoderBlock2D(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        resolution_idx = None,
         num_layers: int = 1,
-        resnet_eps: float = 1e-6,
         resnet_groups: int = 32,
         add_upsample: bool = True,
     ):
         super().__init__()
+        # assert num_layers == 1 or ...
+        assert resnet_groups == 32
+
         resnets = []
 
         for i in range(num_layers):
@@ -297,11 +269,8 @@ class UpDecoderBlock2D(nn.Module):
         else:
             self.upsamplers = None
 
-        self.resolution_idx = resolution_idx
-
-    def forward(self, hidden_states: torch.Tensor, temb = None):
+    def forward(self, hidden_states):
         for resnet in self.resnets:
-            # hidden_states = resnet(hidden_states, temb=temb)
             hidden_states = resnet(hidden_states)
 
         if self.upsamplers is not None:
@@ -348,6 +317,8 @@ class Upsample2D(nn.Module):
 class ResnetBlock2D(nn.Module):
     def __init__(self, in_channels, out_channels=None):
         super().__init__()
+        assert out_channels is not None
+
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
@@ -390,6 +361,11 @@ class Encoder(nn.Module):
         norm_num_groups = 32,
     ):
         super().__init__()
+        assert in_channels == 3
+        assert out_channels == 4
+        assert layers_per_block == 2
+        assert norm_num_groups == 32
+
         self.conv_in = nn.Conv2d(
             in_channels,
             block_out_channels[0],
@@ -411,7 +387,6 @@ class Encoder(nn.Module):
                 in_channels=input_channel,
                 out_channels=output_channel,
                 add_downsample=not is_final_block,
-                resnet_eps=1e-6,
                 resnet_groups=norm_num_groups,
             )
             self.down_blocks.append(down_block)
@@ -419,10 +394,8 @@ class Encoder(nn.Module):
         # mid
         self.mid_block = UNetMidBlock2D(
             in_channels=block_out_channels[-1],
-            resnet_eps=1e-6,
             attention_head_dim=block_out_channels[-1],
             resnet_groups=norm_num_groups,
-            add_attention=True,
         )
 
         # out
@@ -434,7 +407,7 @@ class Encoder(nn.Module):
 
         # pdb.set_trace()
 
-    def forward(self, sample: torch.Tensor) -> torch.Tensor:
+    def forward(self, sample):
         sample = self.conv_in(sample)
 
         # down
@@ -462,6 +435,10 @@ class Decoder(nn.Module):
         norm_num_groups = 32,
     ):
         super().__init__()
+        assert in_channels == 4
+        assert out_channels == 3
+        assert layers_per_block == 2
+        assert norm_num_groups == 32
 
         self.conv_in = nn.Conv2d(
             in_channels,
@@ -476,10 +453,8 @@ class Decoder(nn.Module):
         # mid
         self.mid_block = UNetMidBlock2D(
             in_channels=block_out_channels[-1],
-            resnet_eps=1e-6,
             attention_head_dim=block_out_channels[-1],
             resnet_groups=norm_num_groups,
-            add_attention=True,
         )
 
         # up
@@ -495,7 +470,6 @@ class Decoder(nn.Module):
                 in_channels=prev_output_channel,
                 out_channels=output_channel,
                 add_upsample=not is_final_block,
-                resnet_eps=1e-6,
                 resnet_groups=norm_num_groups,
             )
             self.up_blocks.append(up_block)
@@ -508,81 +482,57 @@ class Decoder(nn.Module):
 
         # pdb.set_trace()
 
-    def forward(self, sample, latent_embeds = None):
-        r"""The forward method of the `Decoder` class."""
-
+    def forward(self, sample):
         sample = self.conv_in(sample)
-
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
         # middle
-        sample = self.mid_block(sample, latent_embeds)
+        sample = self.mid_block(sample)
         sample = sample.to(upscale_dtype)
 
         # up
         for up_block in self.up_blocks:
-            sample = up_block(sample, latent_embeds)
+            sample = up_block(sample)
 
         # post-process
-        if latent_embeds is None:
-            sample = self.conv_norm_out(sample)
-        else:
-            sample = self.conv_norm_out(sample, latent_embeds)
+        sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
 
         return sample
 
-# def torch_nn_arange(x):
-#     if x.dim() == 2:
-#         B, C = x.size()
-#         a = torch.arange(x.nelement())/x.nelement()
-#         a = a.to(x.device)
-#         return a.view(B, C)
+def torch_nn_arange(x):
+    if x.dim() == 2:
+        B, C = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B, C)
 
-#     if x.dim() == 3:
-#         B, C, HW = x.size()
-#         a = torch.arange(x.nelement())/x.nelement()
-#         a = a.to(x.device)
-#         return a.view(B, C, HW)
+    if x.dim() == 3:
+        B, C, HW = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B, C, HW)
 
-#     B, C, H, W = x.size()
-#     a = torch.arange(x.nelement())/x.nelement()
-#     a = a.to(x.device)
-#     return a.view(B, C, H, W)
-
-
-
-# if __name__ == "__main__":
-#     model = AutoencoderKL()
-#     model.eval()
-
-#     # print(model)
-
-#     # model.cuda()
-#     # input = torch.randn(1, 3, 1024, 1024).cuda()
-#     # with torch.no_grad():
-#     #     output = model(input)
-
-#     # todos.debug.output_var("output", output)
-
-#     # class_name = model.__class__.__name__
-#     # model = torch.jit.script(model)
-#     # print(f"torch.jit.script({class_name}) OK !")
-
-#     x = torch.randn(6, 4, 64, 64)
-#     x = torch_nn_arange(x)
-#     with torch.no_grad():
-#         y = model.decode(x)
-#     todos.debug.output_var("y1", y)
-#     # expect tensor [y1] size: [6, 3, 512, 512], min: -0.549043, max: 0.309814, mean: -0.072002
+    B, C, H, W = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H, W)
 
 
-#     x = torch.randn(1, 3, 1024, 1024)
-#     x = torch_nn_arange(x)
-#     with torch.no_grad():
-#         y = model.encode(x)
-#     todos.debug.output_var("y2", y)
-#     # expect tensor [y2] size: [1, 4, 128, 128], min: -10.59375, max: 7.34375, mean: 0.331158
+if __name__ == "__main__":
+    model = AutoencoderKL()
+    model.eval()
 
-#     # tensor [y1] size: [6, 3, 512, 512], min: -0.549043, max: 0.309814, mean: -0.072002
-#     # tensor [y2] size: [1, 4, 128, 128], min: -10.593253, max: 7.344119, mean: 0.331303
+    x = torch.randn(6, 4, 64, 64)
+    x = torch_nn_arange(x)
+    with torch.no_grad():
+        y = model.decode(x)
+    todos.debug.output_var("y1", y)
+    # expect tensor [y1] size: [6, 3, 512, 512], min: -0.549043, max: 0.309814, mean: -0.072002
+
+    x = torch.randn(1, 3, 1024, 1024)
+    x = torch_nn_arange(x)
+    with torch.no_grad():
+        y = model.encode(x)
+    todos.debug.output_var("y2", y)
+    # expect tensor [y2] size: [1, 4, 128, 128], min: -10.59375, max: 7.34375, mean: 0.331158
