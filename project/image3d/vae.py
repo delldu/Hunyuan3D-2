@@ -215,12 +215,9 @@ class UNetMidBlock2D(nn.Module):
         self.attentions = nn.ModuleList(attentions)
         self.resnets = nn.ModuleList(resnets)
 
-        # pdb.set_trace()
-
     def forward(self, hidden_states):
         hidden_states = self.resnets[0](hidden_states)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
-            pdb.set_trace()
             hidden_states = attn(hidden_states)
             hidden_states = resnet(hidden_states)
 
@@ -260,12 +257,6 @@ class UpDecoderBlock2D(nn.Module):
 
         return hidden_states
 
-def nonlinearity(x):
-    return x * torch.sigmoid(x)  # nonlinearity, F.silu
-
-def Normalize(in_channels, num_groups=32):
-    return nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
-
 class Downsample2D(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -296,10 +287,10 @@ class ResnetBlock2D(nn.Module):
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
 
-        self.norm1 = Normalize(in_channels)
+        self.norm1 = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
-        self.norm2 = Normalize(out_channels)
+        self.norm2 = nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
         self.nonlinearity = nn.SiLU()
@@ -438,7 +429,6 @@ class Decoder(nn.Module):
                 add_upsample=not is_final_block,
             )
             self.up_blocks.append(up_block)
-            prev_output_channel = output_channel
 
         # out
         self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=32, eps=1e-6)
