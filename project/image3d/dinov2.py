@@ -6,6 +6,40 @@ import torch.nn.functional as F
 import todos
 import pdb
 
+def torch_nn_arange(x):
+    if x.dim() == 2:
+        B, C = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B, C)
+
+    if x.dim() == 3:
+        B, C, HW = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B, C, HW)
+
+    B, C, H, W = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H, W)
+
+
+def scaled_dot_product_attention(query, key, value, scale):
+    # tensor [query] size: [1, 24, 1370, 64], min: -13.054688, max: 11.445312, mean: 0.037795
+    # tensor [key] size: [1, 24, 1370, 64], min: -6.039062, max: 6.476562, mean: 0.016409
+    # key.transpose(-2, -1).size() -- [1, 24, 64, 1370]
+
+    attn_weight = (query @ key.transpose(-2, -1)) * scale
+    # attn_weight += attn_bias
+    # attn_weight.size() -- [1, 24, 1370, 1370]
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+    # attn_weight.size() -- [1, 24, 1370, 1370]
+    # attn_weight = torch.dropout(attn_weight, dropout_p, train=False)
+
+    # tensor [value] size: [1, 24, 1370, 64], min: -5.4375, max: 5.832031, mean: -0.000374
+    return attn_weight @ value # size() -- [1, 24, 1370, 64]
+
 # ----------------------------------------
 class Dinov2Embeddings(nn.Module):
     """
@@ -23,54 +57,25 @@ class Dinov2Embeddings(nn.Module):
         #   (patch_embeddings): Dinov2PatchEmbeddings(
         #     (projection): Conv2d(3, 1536, kernel_size=(14, 14), stride=(14, 14))
         #   )
-        #   (dropout): Dropout(p=0.0, inplace=False)
         # )
 
-    # def interpolate_pos_encoding(self, embeddings, height: int, width: int):
-    #     num_patches = embeddings.shape[1] - 1
-    #     num_positions = self.position_embeddings.shape[1] - 1  # 1369
-
-    #     # always interpolate when tracing to ensure the exported model works for dynamic input shapes
-    #     if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
-    #         return self.position_embeddings
-
-    #     pdb.set_trace()
-    #     class_pos_embed = self.position_embeddings[:, :1]
-    #     patch_pos_embed = self.position_embeddings[:, 1:]
-
-    #     dim = embeddings.shape[-1]
-
-    #     new_height = height // self.patch_size
-    #     new_width = width // self.patch_size
-
-    #     sqrt_num_positions = int(num_positions ** 0.5)
-
-    #     patch_pos_embed = patch_pos_embed.reshape(1, sqrt_num_positions, sqrt_num_positions, dim)
-    #     todos.debug.output_var("patch_pos_embed 1", patch_pos_embed)
-    #     patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
-    #     todos.debug.output_var("patch_pos_embed 2", patch_pos_embed)
-
-    #     patch_pos_embed = nn.functional.interpolate(
-    #         patch_pos_embed.to(torch.float32), size=(new_height, new_width), mode="bilinear", align_corners=True
-    #     ).to(dtype=patch_pos_embed.dtype)
-
-    #     todos.debug.output_var("patch_pos_embed 3", patch_pos_embed)
-    #     patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-    #     todos.debug.output_var("patch_pos_embed 4", patch_pos_embed)
-    #     return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
 
     def forward(self, pixel_values):
         B, C, H, W = pixel_values.size()  # size() -- [1, 3, 518, 518]
         target_dtype = self.patch_embeddings.projection.weight.dtype
         embeddings = self.patch_embeddings(pixel_values.to(dtype=target_dtype))
+        # embeddings.size() -- [1, 1369, 1536]
 
         # add the [CLS] token to the embedded patch tokens
+        # self.cls_token.size() -- [1, 1, 1536]
         cls_tokens = self.cls_token.expand(B, -1, -1)
-        embeddings = torch.cat((cls_tokens, embeddings), dim=1)
+        # cls_tokens.size() -- [1, 1, 1536]
+
+        embeddings = torch.cat((cls_tokens, embeddings), dim=1) # size() -- [1, 1370, 1536]
 
         # add positional encoding to each token
         embeddings = embeddings +  self.position_embeddings # self.interpolate_pos_encoding(embeddings, H, W)
-        return embeddings
+        return embeddings # size() -- [1, 1370, 1536]
 
 # ----------------------------------------
 class Dinov2PatchEmbeddings(nn.Module):
@@ -94,8 +99,10 @@ class Dinov2PatchEmbeddings(nn.Module):
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
                 f" Expected {self.num_channels} but got {num_channels}."
             )
+        # pixel_values.size() -- [1, 3, 518, 518]
+        # self.projection(pixel_values).size() -- [1, 1536, 37, 37] --> [1, 1536, 1369]
         embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
-        return embeddings
+        return embeddings # size() -- [1, 1369, 1536]
 
 
 def sdpa_attention_forward(query, key, value, scaling=0.125):
@@ -104,11 +111,13 @@ def sdpa_attention_forward(query, key, value, scaling=0.125):
     key = key.contiguous()
     value = value.contiguous()
 
-    attn_output = F.scaled_dot_product_attention(
-        query, key, value, attn_mask=None, dropout_p=0.0, scale=scaling, is_causal=False
-    )
+    # attn_output = F.scaled_dot_product_attention(
+    #     query, key, value, attn_mask=None, dropout_p=0.0, scale=scaling, is_causal=False
+    # )
+    attn_output = scaled_dot_product_attention(query, key, value, scale=scaling)
+    # attn_output.size() -- [1, 24, 1370, 64]
     attn_output = attn_output.transpose(1, 2).contiguous()
-
+    # attn_output.size() -- [1, 1370, 24, 64]
     return attn_output
 
 
@@ -173,9 +182,9 @@ class Dinov2Attention(nn.Module):
 
 # ----------------------------------------
 class Dinov2LayerScale(nn.Module):
-    def __init__(self, hidden_size=1536, layerscale_value=1.0):
+    def __init__(self, hidden_size=1536):
         super().__init__()
-        self.lambda1 = nn.Parameter(layerscale_value * torch.ones(hidden_size))
+        self.lambda1 = nn.Parameter(torch.ones(hidden_size))
 
     def forward(self, hidden_state):
         return hidden_state * self.lambda1
@@ -192,7 +201,10 @@ class Dinov2SwiGLUFFN(nn.Module):
 
     def forward(self, hidden_state):
         hidden_state = self.weights_in(hidden_state)
+        # hidden_state -- torch.Size([1, 1370, 8192])
         x1, x2 = hidden_state.chunk(2, dim=-1)
+        # (Pdb) x1.size() -- [1, 1370, 4096]
+        # (Pdb) x2.size() -- [1, 1370, 4096]
         hidden = nn.functional.silu(x1) * x2
         return self.weights_out(hidden)
 
@@ -222,7 +234,7 @@ class Dinov2Layer(nn.Module):
 
         # second residual connection
         layer_output = layer_output + hidden_states
-        return layer_output
+        return layer_output # [1, 1370, 1536]
 
 
 # ----------------------------------------------------------
@@ -237,7 +249,7 @@ class Dinov2Encoder(nn.Module):
         return hidden_states  # last_hidden_state
 
 # -----------------------------------------------------------------------------------
-class Dinov2Model(nn.Module):
+class Dinov2Network(nn.Module):
     ##########################################################################################
     # main_image_encoder:
     #   #type: DinoImageEncoder # dino giant
@@ -271,12 +283,19 @@ class Dinov2Model(nn.Module):
         self.layernorm = nn.LayerNorm(hidden_size, eps=1e-6)
 
         self.load_weights()
+        # from ggml_engine import create_network
+        # create_network(self)
+
 
     def forward(self, pixel_values):
         # tensor [pixel_values] size: [1, 3, 518, 518], min: -2.099609, max: 2.638672, mean: 1.449731
         embedding_output = self.embeddings(pixel_values)
+        # embedding_output.size() -- [1, 1370, 1536]
+
         encoder_output = self.encoder(embedding_output)
+        # encoder_output.size() -- [1, 1370, 1536]
         last_hidden_state = self.layernorm(encoder_output)
+        # last_hidden_state.size() -- [1, 1370, 1536]
 
         return last_hidden_state
 
@@ -285,3 +304,21 @@ class Dinov2Model(nn.Module):
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
         print(f"Loading {checkpoint} ...")
         self.load_state_dict(torch.load(checkpoint), strict=True)
+
+
+if __name__ == "__main__":
+    device = torch.device("cpu")
+    model = Dinov2Network()
+    model.half()
+    model.to(device)
+    model.eval()
+
+    x = torch.randn(1, 3, 518, 518).to(device).half()
+    x = torch_nn_arange(x)
+
+    with torch.no_grad():
+        y = model(x)
+
+    todos.debug.output_var("y", y)
+    # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
+

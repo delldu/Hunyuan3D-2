@@ -17,7 +17,6 @@ struct LastLayer {
 
     void create_weight_tensors(struct ggml_context* ctx) {
         norm_final.normalized_shape = hidden_size;
-        norm_final.dim = 0;
         norm_final.eps = 1e-6; // Fixed default values
         norm_final.elementwise_affine = false;
         norm_final.create_weight_tensors(ctx);
@@ -84,7 +83,6 @@ struct LastLayer {
     }
 };
 
-
 struct SingleModulation {
     const int dim = 1024;
     const int multiplier = 3;
@@ -105,12 +103,30 @@ struct SingleModulation {
         lin.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
+    //     def forward(self, vec):
+    //         out = F.silu(vec)
+    //         # tensor [out] size: [2, 1024], min: -0.118526, max: 5.067151, mean: 0.023684
+    //         out = self.lin(out)
+    //         # tensor [out] size: [2, 3072], min: -2.356169, max: 2.526265, mean: 0.078408
 
-    	return x;
+    //         out = out[:, None, :] # size() -- [2, 1, 3072]
+    //         out = out.chunk(self.multiplier, dim=-1)
+
+    //         return out[0], out[1], out[2] # shift, scale, gate
+
+    std::vector<ggml_tensor_t*> forward(struct ggml_context* ctx, ggml_tensor_t* vec) {
+        ggml_tensor_t *out = ggml_silu(ctx, vec);
+        out = lin.forward(ctx, out);
+        int C0 = (int)out->ne[0];
+        int C1 = (int)out->ne[1];
+        out = ggml_reshape_3d(ctx, out, C0, 1, C1);
+
+        ggml_tensor_dump("SingleModulation", out);
+
+        return ggml_nn_chunks(ctx, out, 0/*dim*/, multiplier); // shift, scale, gate
     }
 };
+
 
 struct RMSNorm {
     int dim = 64;
@@ -128,7 +144,7 @@ struct RMSNorm {
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = ggml_mul(ctx, x, x);
         x = ggml_mean_ext(ctx, x, 0/*dim*/);
-        x = ggml_add(ctx, x, 1e-6);
+        x = ggml_add_constant(ctx, x, 1e-6);
 
         ggml_tensor *rrms = ggml_sqrt(ctx, x);
         ggml_tensor_t *one = ggml_dup(ctx, rrms);
@@ -137,11 +153,9 @@ struct RMSNorm {
 
         x = ggml_nn_mul_mat(ctx, x, rrms);
         x = ggml_nn_mul_mat(ctx, x, scale);
-
         return x;
     }
 };
-
 
 struct QKNorm {
     int dim = 64;
@@ -165,33 +179,9 @@ struct QKNorm {
         key_norm.setup_weight_names(s);
     }
 
-
-    // def forward(self, q, k, v):
-    //     q = self.query_norm(q)
-    //     k = self.key_norm(k)
-    //     return q.to(v), k.to(v)
-
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        // please implement forward by your self, please !!!
-
+        // # !!!!!!!!!!!!!!! useless, place holder ...
         return x;
-    }
-};
-
-// https://pytorch.org/docs/stable/generated/torch.nn.GELU.html
-struct GELU {
-    // char* approximate = "tanh";
-
-    void create_weight_tensors(struct ggml_context* ctx) {
-        GGML_UNUSED(ctx);
-    }
-
-    void setup_weight_names(const char *prefix) {
-        GGML_UNUSED(prefix);
-    }
-
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        return ggml_gelu(ctx, x);
     }
 };
 
@@ -210,14 +200,6 @@ struct SingleStreamBlock {
     struct LayerNorm pre_norm;
     // struct GELU mlp_act;
     struct SingleModulation modulation;
-
-
-    // self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + self.mlp_hidden_dim)
-    // self.linear2 = nn.Linear(hidden_size + self.mlp_hidden_dim, hidden_size)
-    // self.norm = QKNorm(head_dim)
-    // self.pre_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-    // self.mlp_act = GELU(approximate="tanh")
-    // self.modulation = SingleModulation(hidden_size)
 
     void create_weight_tensors(struct ggml_context* ctx) {
         linear1.in_features = hidden_size;
@@ -238,7 +220,7 @@ struct SingleStreamBlock {
         pre_norm.elementwise_affine = false;
         pre_norm.create_weight_tensors(ctx);
 
-        modulation.dim = hidden_size;
+        // modulation.dim = hidden_size;
         modulation.create_weight_tensors(ctx);
     }
 
@@ -257,7 +239,7 @@ struct SingleStreamBlock {
         modulation.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* vec) {
     	// please implement forward by your self, please !!!
 
     	return x;
@@ -359,7 +341,7 @@ struct DoubleStreamBlock {
     struct Linear txt_mlp_2;
 
     void create_weight_tensors(struct ggml_context* ctx) {
-        img_mod.dim = hidden_size;
+        // img_mod.dim = hidden_size;
         img_mod.create_weight_tensors(ctx);
 
         img_norm1.normalized_shape = hidden_size;
@@ -367,8 +349,8 @@ struct DoubleStreamBlock {
         img_norm1.elementwise_affine = false;
         img_norm1.create_weight_tensors(ctx);
 
-        img_attn.dim = hidden_size;
-        img_attn.num_heads = num_heads;
+        // img_attn.dim = hidden_size;
+        // img_attn.num_heads = num_heads;
         img_attn.create_weight_tensors(ctx);
 
         img_norm2.normalized_shape = hidden_size;
@@ -394,8 +376,8 @@ struct DoubleStreamBlock {
         txt_norm1.elementwise_affine = false;
         txt_norm1.create_weight_tensors(ctx);
 
-        txt_attn.dim = hidden_size;
-        txt_attn.num_heads = num_heads;
+        // txt_attn.dim = hidden_size;
+        // txt_attn.num_heads = num_heads;
         txt_attn.create_weight_tensors(ctx);
 
         txt_norm2.normalized_shape = hidden_size;
@@ -419,12 +401,12 @@ struct DoubleStreamBlock {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "img_mod.");
         img_mod.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "img_norm1.");
-        img_norm1.setup_weight_names(s);
+        // snprintf(s, sizeof(s), "%s%s", prefix, "img_norm1.");
+        // img_norm1.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "img_attn.");
         img_attn.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "img_norm2.");
-        img_norm2.setup_weight_names(s);
+        // snprintf(s, sizeof(s), "%s%s", prefix, "img_norm2.");
+        // img_norm2.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "img_mlp_0.");
         img_mlp_0.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "img_mlp_2.");
@@ -432,12 +414,12 @@ struct DoubleStreamBlock {
         // -----------------------------------------------------------------
         snprintf(s, sizeof(s), "%s%s", prefix, "txt_mod.");
         txt_mod.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "txt_norm1.");
-        txt_norm1.setup_weight_names(s);
+        // snprintf(s, sizeof(s), "%s%s", prefix, "txt_norm1.");
+        // txt_norm1.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "txt_attn.");
         txt_attn.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "txt_norm2.");
-        txt_norm2.setup_weight_names(s);
+        // snprintf(s, sizeof(s), "%s%s", prefix, "txt_norm2.");
+        // txt_norm2.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "txt_mlp.0.");
         txt_mlp_0.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "txt_mlp.2.");
@@ -606,13 +588,13 @@ struct Hunyuan3DDiT {
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* t, ggml_tensor_t* cond) {
         ggml_tensor_t *latent = latent_in.forward(ctx, x);
-        ggml_tensor_t *vec = timestep_embedding.forward(ctx, t, 256, time_factor);
+        ggml_tensor_t *vec; //  = timestep_embedding.forward(ctx, t, 256, time_factor);
         vec = time_in.forward(ctx, vec);
         cond = cond_in.forward(ctx, cond);
 
         // for block in self.double_blocks:  # len(self.double_blocks) === 8
         //     latent, cond = block(img=latent, txt=cond, vec=vec)
-        latent = ggml_cat(ctx, cond, latent, 1/*dim*/);
+        latent = ggml_concat(ctx, cond, latent, 1/*dim*/);
 
         for (int i = 0; i < 16; i++) {
             latent = single_blocks[i].forward(ctx, latent, vec);

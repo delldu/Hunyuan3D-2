@@ -35,10 +35,10 @@ struct QKVMultiheadCrossAttention {
         k_norm.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* q, ggml_tensor_t*kv) {
     	// please implement forward by your self, please !!!
 
-    	return x;
+    	return q;
     }
 };
 
@@ -90,6 +90,13 @@ struct MultiheadCrossAttention {
         attention.setup_weight_names(s);
     }
 
+    // def forward(self, x, data):
+    //     x = self.c_q(x)
+    //     data = self.c_kv(data)
+    //     x = self.attention(x, data)
+    //     x = self.c_proj(x)
+    //     return x
+
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* data) {
         x = c_q.forward(ctx, x);
         data = c_kv.forward(ctx, data);
@@ -133,7 +140,7 @@ struct MLP {
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = c_fc.forward(ctx, x);
-        x = ggml_gelu(ctx, x);
+        x = ggml_gelu_quick(ctx, x);
         x = c_proj.forward(ctx, x);
 
         return x;
@@ -243,17 +250,36 @@ struct FourierEmbedder {
     ggml_tensor_t *frequencies;
 
     void create_weight_tensors(struct ggml_context* ctx) {
-        frequencies = ggml_arange(ctx, 0.0f, (float)num_freqs, 1.0f);
-        frequencies = ggml_scale(ctx, frequencies, 2.0);
+        frequencies = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, num_freqs);
     }
 
     void setup_weight_names(const char *prefix) {
-        // char s[GGML_MAX_NAME];
-        GGML_UNUSED(prefix);        
+        snprintf(s, sizeof(s), "%s%s", prefix, "frequencies");
+        frequencies.setup_weight_names(s);
     }
 
+    // def forward(self, x):
+    //     # tensor [x] size: [1, 8000, 3], min: -1.01, max: 1.01, mean: -0.65878
+    //     # self.frequencies -- tensor([  1.,   2.,   4.,   8.,  16.,  32.,  64., 128.], device='cuda:0')
+    //     # (x[..., None].contiguous() * self.frequencies).size() -- [1, 8000, 3, 8]
+    //     # x.shape[:-1] -- [1, 8000]
+    //     embed = (x[..., None].contiguous() * self.frequencies).view(*x.shape[:-1], -1)
+    //     # tensor [embed] size: [1, 8000, 24], min: -129.279999, max: 129.279999, mean: -20.998594
+    //     return torch.cat((x, embed.sin(), embed.cos()), dim=-1) # [1, 8000, 51]
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
+        int C0 = (int)x->ne[0]; // 3
+        int C1 = (int)x->ne[1]; // 8000
+        int C2 = (int)x->ne[2]; // 1
+        int C3 = 1;
+        ggml_tensor_t* embed = ggml_reshape_4d(ctx, x, C0, C1, C2, C3);
+        ggml_tensor_dump("embed1", embed);
+
+        embed = ggml_nn_mul_mat(ctx, embed, frequencies);
+        embed = ggml_reshape_3d(ctx, embed, 24, C1, 1);
+        ggml_tensor_dump("embed2", embed);
+
+        x = ggml_cat(ctx, 3, x, ggml_sin(ctx, embed), ggml_cos(ctx, embed) 0/*dim*/);
+        ggml_tensor_dump("embed3", x);
 
     	return x;
     }

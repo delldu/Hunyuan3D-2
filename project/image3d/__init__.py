@@ -18,7 +18,7 @@ import torch.nn.functional as F
 import numpy as np
 from skimage import measure
 import trimesh
-from . import shape
+from . import shape, dinov2
 
 import todos
 import pdb
@@ -84,7 +84,7 @@ def get_shape_model():
     # model = dit.Hunyuan3DDiT()
     device = todos.model.get_device()    
     model = shape.ShapeGenerator(device)
-    # model = model.to(device)
+    model = model.to(device)
     model.eval()
 
     if "cpu" in str(device.type):
@@ -105,6 +105,37 @@ def get_shape_model():
     # torch.save(model.state_dict(), "/tmp/image3d.pth")
 
     return model, device
+
+
+def get_dinov2_model():
+    """Create model."""
+
+    # model = vae.ShapeVAE()
+    # model = dit.Hunyuan3DDiT()
+    device = todos.model.get_device()    
+    model = dinov2.Dinov2Network()
+    model = model.to(device)
+    model.eval()
+
+    if "cpu" in str(device.type):
+        model.float()
+
+    print(f"Running on {device} ...")
+    # # make sure model good for C/C++
+    # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;
+    # # torch::jit::setTensorExprFuserEnabled(false);
+
+    # todos.data.mkdir("output")
+    # if not os.path.exists("output/image3d.torch"):
+    #     model.save("output/image3d.torch")
+    # torch.save(model.state_dict(), "/tmp/image3d.pth")
+
+    return model, device
+
 
 
 def predict(input_files, output_dir):

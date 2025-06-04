@@ -5,9 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 
-from .dinov2 import Dinov2Model
+from .dinov2 import Dinov2Network
 from .dit import Hunyuan3DDiT
-from .attn import FourierEmbedder, Transformer, CrossAttentionDecoder
+from .attn import Transformer, CrossAttentionDecoder
 
 from tqdm import tqdm
 from einops import repeat
@@ -15,6 +15,7 @@ from einops import repeat
 import todos
 import pdb
 
+# xxxx_8888 ggml_mesh_grid3d(ctx, X, Y, Z)
 def dense_grid(res, box_m=1.01):
     assert res == 384
     x = torch.linspace(-box_m, box_m, res + 1)
@@ -52,16 +53,16 @@ class ShapeVAE(nn.Module):
         scale_factor = 1.0188137142395404,
     ):
         super().__init__()
+        
         self.post_kl = nn.Linear(embed_dim, width)
         # self.post_kl -- Linear(in_features=64, out_features=1024, bias=True)
 
-        self.transformer = Transformer(n_ctx=num_latents, width=width, layers=num_decoder_layers, heads=heads)
+        self.transformer = Transformer(width=width, layers=num_decoder_layers, heads=heads)
         self.geo_decoder = CrossAttentionDecoder(
-            out_channels=1, num_latents=num_latents, mlp_expand_ratio=4, width=width, heads=heads
+            out_channels=1, mlp_expand_ratio=4, width=width, heads=heads
         )
-
         self.scale_factor = scale_factor  # 1.0188137142395404
-        self.latent_shape = (num_latents, embed_dim)  # (512, 64)
+        # self.latent_shape = (num_latents, embed_dim)  # (512, 64)
 
         self.load_weights()
 
@@ -75,12 +76,13 @@ class ShapeVAE(nn.Module):
 
         # 2. latents to 3d volume
         grid_res = 384
-        num_chunks = 8000
+        num_chunks = 80 * 1024 #8000
         batch_size = latents.shape[0] # 1
         xyz_samples = dense_grid(384)
         xyz_samples = xyz_samples.view(-1, 3).to(latents.device)
         # tensor [xyz_samples] size: [57066625, 3], min: -1.009766, max: 1.009766, mean: 0.0
 
+        # running on cuda device
         batch_logits = []
         for start in tqdm(range(0, xyz_samples.shape[0], num_chunks), desc=f"Volume Decoding"):
             chunk_queries = xyz_samples[start: start + num_chunks, :]
@@ -123,7 +125,7 @@ class ShapeGenerator(nn.Module):
     def __init__(self, device):
         super().__init__()
         self.device = device
-        self.dinov2_model = Dinov2Model()
+        self.dinov2_model = Dinov2Network()
         self.dit_model = Hunyuan3DDiT()
         self.vae_model = ShapeVAE()
 
@@ -137,6 +139,9 @@ class ShapeGenerator(nn.Module):
         self.dinov2_model.to(self.device)
         dinov2_output = self.dinov2_model(image)
         # todos.debug.output_var("dinov2_output", dinov2_output)
+        # tensor [dinov2_output] size: [1, 1370, 1536], min: -15.366865, max: 14.495687, mean: -0.018664
+
+
         self.dinov2_model.cpu()
 
         dit_condition = torch.cat((dinov2_output, torch.zeros_like(dinov2_output)), dim = 0)
@@ -168,9 +173,40 @@ class ShapeGenerator(nn.Module):
                 latents = latents + step_scale * noise_pred
 
         self.dit_model.cpu()
+        # todos.debug.output_var("latents", latents)
+        # tensor [latents] size: [1, 512, 64], min: -3.639221, max: 4.058057, mean: 0.003392
 
         self.vae_model.to(self.device)
         grid_logits = self.vae_model(latents)
         self.vae_model.cpu()
+        # todos.debug.output_var("grid_logits", grid_logits)
+        # tensor [grid_logits] size: [1, 385, 385, 385], min: -1.065998, max: 1.185178, mean: -0.799923
 
-        return grid_logits # [1, 385, 385, 385]
+        return grid_logits 
+
+
+def torch_nn_arange(x):
+    if x.dim() == 1:
+        B = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B)
+
+    if x.dim() == 2:
+        B, C = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B, C)
+
+    if x.dim() == 3:
+        B, C, HW = x.size()
+        a = torch.arange(x.nelement())/x.nelement()
+        a = a.to(x.device)
+        return a.view(B, C, HW)
+
+    B, C, H, W = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H, W)
+
+
