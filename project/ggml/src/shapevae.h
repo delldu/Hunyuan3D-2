@@ -4,6 +4,76 @@
 #include "ggml_nn.h"
 
 #pragma GCC diagnostic ignored "-Wformat-truncation"
+extern ggml_tensor_t* scaled_dot_product_attention(struct ggml_context* ctx, ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value);
+
+// bool ggml_backend_buffer_is_host(ggml_backend_buffer_t buffer) {
+//     return ggml_backend_buft_is_host(ggml_backend_buffer_get_type(buffer));
+// }
+
+
+// GGML_CALL void ggml_backend_tensor_set(struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+//     ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
+
+//     GGML_ASSERT(buf != NULL && "tensor buffer not set");
+//     GGML_ASSERT(tensor->data != NULL && "tensor not allocated");
+//     GGML_ASSERT(offset + size <= ggml_nbytes(tensor) && "tensor write out of bounds");
+
+//     if (!size) {
+//         return;
+//     }
+
+//     buf->iface.set_tensor(buf, tensor, data, offset, size);
+// }
+
+
+// def dense_grid(res, box_m=1.01):
+//     # assert res == 384
+//     x = torch.linspace(-box_m, box_m, res + 1)
+//     y = torch.linspace(-box_m, box_m, res + 1)
+//     z = torch.linspace(-box_m, box_m, res + 1)
+//     xs, ys, zs = torch.meshgrid(x, y, z, indexing = "ij")
+//     xyz_grid = torch.stack((xs, ys, zs), dim = -1)
+
+//     return xyz_grid # size() -- [385, 385, 385, 3]
+
+bool ggml_tensor_on_host(ggml_tensor_t *x) {
+    ggml_backend_buffer_t buffer = x->view_src ? x->view_src->buffer : x->buffer;
+    GGML_ASSERT(buffer != NULL && "tensor buffer not set");
+    return ggml_backend_buffer_is_host(buffer);
+}
+
+std::vector<float> dense_grid_data(int n, int res, float box_m) {
+    // res == 385 ...
+    std::vector<float> data;
+    float step = 2.0f * box_m / (res - 1);
+
+    int start = n * res;
+    for (int index = 0; index < res * res; index++) {
+        int start_index = start + index;
+        int k = start_index % res; start_index /= res;
+        int j = start_index % res; start_index /= res;
+        int i = start_index % res; // start_index /= res;
+
+        data.push_back(-box_m + i * step);
+        data.push_back(-box_m + j * step);
+        data.push_back(-box_m + k * step);
+    }
+
+    return data;
+}
+
+bool dense_grid_fill(ggml_tensor_t *x, std::vector<float> &data) {
+    if (x == nullptr || ggml_nbytes(x) != sizeof(float) * data.size())
+        return false;
+
+    if (ggml_tensor_on_host(x)) {
+        memcpy(x->data, data.data(), ggml_nbytes(x));
+    } else {
+        ggml_backend_tensor_set(x, data.data(), 0, ggml_nbytes(x));
+    }
+    return true;
+}
+
 
 struct QKVMultiheadCrossAttention {
     int heads = 16;
@@ -35,10 +105,69 @@ struct QKVMultiheadCrossAttention {
         k_norm.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* q, ggml_tensor_t*kv) {
-    	// please implement forward by your self, please !!!
+    // def forward(self, q, kv):
+    //     # tensor [q] size: [1, 8000, 1024], min: -8.914062, max: 8.632812, mean: -0.044021
+    //     # tensor [kv] size: [1, 512, 2048], min: -8.289062, max: 7.117188, mean: -0.008912
+    //     _, n_q, _ = q.shape
+    //     bs, n_kv, width = kv.shape
+    //     attn_ch = width // self.heads // 2 # 64
 
-    	return q;
+    //     q = q.view(bs, n_q, self.heads, -1) # [1, 8000, 1024] --> [1, 8000, 16, 64]
+    //     kv = kv.view(bs, n_kv, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
+    //     k, v = torch.split(kv, attn_ch, dim=-1)
+    //     # (Pdb) pp k.size() -- [1, 512, 16, 64]
+    //     # (Pdb) pp v.size() -- [1, 512, 16, 64]
+
+    //     q = self.q_norm(q)
+    //     k = self.k_norm(k)
+
+    //     # q, k, v is tuple: len = 3
+    //     #     tensor [item] size: [1, 8000, 16, 64], min: -8.539062, max: 7.707031, mean: 0.039068
+    //     #     tensor [item] size: [1, 512, 16, 64], min: -9.210938, max: 9.054688, mean: -0.000345
+    //     #     tensor [item] size: [1, 512, 16, 64], min: -7.964844, max: 7.097656, mean: 0.005364
+    //     q, k, v = map(lambda t: rearrange(t, "b n h d -> b h n d", h=self.heads), (q, k, v))
+    //     # q, k, v is tuple: len = 3
+    //     #     tensor [item] size: [1, 16, 8000, 64], min: -8.539062, max: 7.707031, mean: 0.039068
+    //     #     tensor [item] size: [1, 16, 512, 64], min: -9.210938, max: 9.054688, mean: -0.000345
+    //     #     tensor [item] size: [1, 16, 512, 64], min: -7.964844, max: 7.097656, mean: 0.005364
+    //     out = F.scaled_dot_product_attention(q, k, v)
+    //     out = out.transpose(1, 2).reshape(bs, n_q, -1)
+    //     # tensor [out] size: [1, 8000, 1024], min: -7.214844, max: 5.949219, mean: 0.02275
+
+    //     return out
+
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* q, ggml_tensor_t* kv) {
+        int n_q = (int)q->ne[1];
+        int bs = (int)kv->ne[2];
+        int n_kv = (int)kv->ne[1];
+        int width = (int)kv->ne[0];
+
+    //     q = q.view(bs, n_q, self.heads, -1) # [1, 8000, 1024] --> [1, 8000, 16, 64]
+    //     kv = kv.view(bs, n_kv, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
+        q = ggml_reshape_4d(ctx, q, -1, heads, n_q, bs);
+        kv = ggml_reshape_4d(ctx, kv, -1, heads, n_kv, bs);
+        int S = (int)kv->ne[0]; // 64
+        ggml_tensor_t *k = ggml_nn_slice(ctx, kv, 0/*dim*/, 0*S/*start*/, 1*S/*stop*/, 1);
+        ggml_tensor_t *v = ggml_nn_slice(ctx, kv, 0/*dim*/, 1*S/*start*/, 2*S/*stop*/, 1);
+        q = q_norm.forward(ctx, q);
+        k = q_norm.forward(ctx, k);
+        // ----------------------------------------------------------------------------------------
+        q = ggml_permute(ctx, q, 0, 2, 1, 3);
+        k = ggml_permute(ctx, k, 0, 2, 1, 3);
+        v = ggml_permute(ctx, v, 0, 2, 1, 3);
+
+        ggml_tensor_dump("===> q", q);
+        ggml_tensor_dump("===> k", k);
+        ggml_tensor_dump("===> v", v);
+
+        ggml_tensor_t *out = scaled_dot_product_attention(ctx, q, k, v);
+        out = ggml_reshape_4d(ctx, out, 0, 2, 1, 3);
+        out = ggml_reshape_3d(ctx, out, -1, n_q, bs);
+
+        ggml_tensor_dump("===> out", out);
+
+        return out;
     }
 };
 
@@ -254,8 +383,7 @@ struct FourierEmbedder {
     }
 
     void setup_weight_names(const char *prefix) {
-        snprintf(s, sizeof(s), "%s%s", prefix, "frequencies");
-        frequencies.setup_weight_names(s);
+        ggml_format_name(frequencies, "%s%s", prefix, "frequencies");
     }
 
     // def forward(self, x):
@@ -278,7 +406,7 @@ struct FourierEmbedder {
         embed = ggml_reshape_3d(ctx, embed, 24, C1, 1);
         ggml_tensor_dump("embed2", embed);
 
-        x = ggml_cat(ctx, 3, x, ggml_sin(ctx, embed), ggml_cos(ctx, embed) 0/*dim*/);
+        x = ggml_cat(ctx, 3, x, ggml_sin(ctx, embed), ggml_cos(ctx, embed), 0/*dim*/);
         ggml_tensor_dump("embed3", x);
 
     	return x;
@@ -379,10 +507,52 @@ struct QKVMultiheadAttention {
         k_norm.setup_weight_names(s);        
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
+    // def forward(self, qkv):
+    //     # tensor [qkv] size: [1, 512, 3072], min: -9.280807, max: 11.263318, mean: -0.00128
 
-    	return x;
+    //     bs, n_q, width = qkv.shape
+    //     attn_ch = width // self.heads // 3
+    //     qkv = qkv.view(bs, n_q, self.heads, -1)
+    //     q, k, v = torch.split(qkv, attn_ch, dim=-1)
+
+    //     q = self.q_norm(q)
+    //     k = self.k_norm(k)
+    //     # q, k, v is tuple: len = 3
+    //     #     tensor [item] size: [1, 512, 16, 64], min: -6.835938, max: 6.566406, mean: -0.002259
+    //     #     tensor [item] size: [1, 512, 16, 64], min: -6.929688, max: 7.53125, mean: 0.000862
+    //     #     tensor [item] size: [1, 512, 16, 64], min: -3.498047, max: 3.671875, mean: -0.000247
+    //     q, k, v = map(lambda t: rearrange(t, "b n h d -> b h n d", h=self.heads), (q, k, v))
+    //     # q, k, v is tuple: len = 3
+    //     #     tensor [item] size: [1, 16, 512, 64], min: -6.835938, max: 6.566406, mean: -0.002259
+    //     #     tensor [item] size: [1, 16, 512, 64], min: -6.929688, max: 7.53125, mean: 0.000862
+    //     #     tensor [item] size: [1, 16, 512, 64], min: -3.498047, max: 3.671875, mean: -0.000247
+
+    //     # [1, 16, 512, 64] ==> [1, 512, 16, 64] ==> [1, 512, 1024]
+    //     out = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(bs, n_q, -1)
+    //     return out
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* qkv) {
+        int bs = (int)qkv->ne[2];
+        int n_q = (int)qkv->ne[1];
+        int width = (int)qkv->ne[0];
+
+        qkv = ggml_reshape_4d(ctx, qkv, -1, heads, n_q, bs);
+        int S = (int)qkv->ne[0]/3;
+        ggml_tensor_t* q = ggml_nn_slice(ctx, qkv, 0/*dim*/, 0*S/*start*/, 1*S/*stop*/, 1/*step*/);
+        ggml_tensor_t* k = ggml_nn_slice(ctx, qkv, 0/*dim*/, 1*S/*start*/, 2*S/*stop*/, 1/*step*/);
+        ggml_tensor_t* v = ggml_nn_slice(ctx, qkv, 0/*dim*/, 2*S/*start*/, 3*S/*stop*/, 1/*step*/);
+        // --------------------------------------------------------------------------
+        q = q_norm.forward(ctx, q);
+        k = k_norm.forward(ctx, k);
+        q = ggml_reshape_4d(ctx, q, 0, 2, 1, 3);
+        k = ggml_reshape_4d(ctx, k, 0, 2, 1, 3);
+        v = ggml_reshape_4d(ctx, v, 0, 2, 1, 3);
+
+        ggml_tensor_t *out = scaled_dot_product_attention(ctx, q, k, v);
+        out = ggml_reshape_4d(ctx, out, 0, 2, 1, 3);
+        out = ggml_reshape_3d(ctx, out, -1, n_q, bs);
+
+    	return out;
     }
 };
 
@@ -650,12 +820,41 @@ struct ShapeVAE {
 
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* latents) {
+        // 1. latents decode
         latents = ggml_scale(ctx, latents, scale_factor);
         latents = post_kl.forward(ctx, latents);
         latents = transformer.forward(ctx, latents);
 
+        // 2. latents to 3d volume
+        int grid_res = 385;
+        int num_chunks = 8 * 1024;
+        int batch_size = latents->ne[2]; // === 1
+        GGML_ASSERT(batch_size == 1);
 
-    	return latents;
+
+        // 3. running geo_decoder
+        ggml_tensor_t *chunk_queries = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, grid_res*grid_res, 1);
+        ggml_tensor_t *logits;
+        ggml_tensor_t *grid_logits = nullptr;
+
+        for (int n = 0; n < grid_res; n++) {
+            std::vector<float> data = dense_grid_data(n, grid_res, 1.01);
+            dense_grid_fill(chunk_queries, data);
+
+            ggml_tensor_dump("chunk_queries", chunk_queries);
+            logits = geo_decoder.forward(ctx, chunk_queries, latents);
+
+            if (grid_logits == nullptr) {
+                grid_logits = ggml_dup(ctx, logits);
+            } else {
+                grid_logits = ggml_concat(ctx, grid_logits, logits, 1/*dim*/);
+            }
+        }
+
+        grid_logits = ggml_reshape_4d(ctx, grid_logits, grid_res, grid_res, grid_res, 3);
+        ggml_tensor_dump("grid_logits", grid_logits);
+
+    	return grid_logits;
     }
 };
 

@@ -5,6 +5,80 @@
 
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 
+extern ggml_tensor_t* scaled_dot_product_attention(struct ggml_context* ctx, ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value);
+
+
+// def attention(q, k, v):
+//     # x = F.scaled_dot_product_attention(q, k, v)
+//     # pp q.size() -- [2, 16, 1882, 64]
+//     assert q.size(-1) == 64
+//     scale_factor = 1 / math.sqrt(q.size(-1))
+//     x = scaled_dot_product_attention(q, k, v, scale_factor)
+
+//     # tensor [x] size: [2, 16, 1882, 64], min: -7.289062, max: 8.179688, mean: 0.010608
+//     x = rearrange(x, "B H L D -> B L (H D)")
+//     # tensor [x] size: [2, 1882, 1024], min: -7.289062, max: 8.179688, mean: 0.010608
+//     return x
+
+
+ggml_tensor_t* attention(struct ggml_context* ctx, ggml_tensor_t* q, ggml_tensor_t* k, ggml_tensor_t* v)
+{
+    ggml_tensor *x = scaled_dot_product_attention(ctx, q, k, v);
+
+    ggml_tensor_dump("attention 1", x);
+    x = ggml_cont(ctx, ggml_permute(ctx, x, 0, 2, 1, 3)); // [64, 1882, 16, 2] ==> [64, 16, 1882, 2] ==> [1024, 1882, 2]
+    ggml_tensor_dump("attention 2", x);
+
+    int C0 = (int)x->ne[0];
+    int C1 = (int)x->ne[1];
+    int C2 = (int)x->ne[2];
+    int C3 = (int)x->ne[3];
+    x = ggml_reshape_3d(ctx, x, C0 * C1, C2, C3);
+
+    ggml_tensor_dump("attention 3", x);
+
+    return x;
+}
+
+ggml_tensor_t* timestep_embedding(struct ggml_context* ctx, ggml_tensor_t* t, int dim /*=256*/, float time_factor /*=1000.0*/)
+{
+    int half = dim/2;
+    t = ggml_scale(ctx, t, time_factor);
+
+    // max_period = 1000.0f;
+    float scale = -0.053966838117047944f; // -math.log(max_period)/half
+
+    // freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(t.device)
+    ggml_tensor_t* freqs = ggml_arange(ctx, 0.0f, (float)half, 1.0f);
+    freqs = ggml_scale(ctx, freqs, scale);
+    freqs = ggml_exp(ctx, freqs);
+
+    t = ggml_reshape_2d(ctx, t, 1, (int)t->ne[0]);
+    ggml_tensor_t *args = ggml_nn_mul_mat(ctx, t, freqs);
+
+    ggml_tensor_dump("===> args", args);
+
+    ggml_tensor_t *out = ggml_concat(ctx, ggml_cos(ctx, args), ggml_sin(ctx, args), 0/*dim*/);
+    ggml_tensor_dump("===> out", out);
+    return out;
+
+    // args = t[:, None].float() * freqs[None]
+    // # args.size() -- [2, 128]
+    // # torch.cos(args).size() -- [2, 128]
+    // embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+    // if dim % 2: # False
+    //     pdb.set_trace()
+    //     embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+    // if torch.is_floating_point(t):  # True
+    //     embedding = embedding.to(t)
+
+    // # tensor [embedding] size: [2, 256], min: 0.0, max: 1.0, mean: 0.5
+    // return embedding
+}
+
+
+
+
 struct LastLayer {
     const int hidden_size = 1024;
     const int patch_size = 1;
@@ -239,9 +313,79 @@ struct SingleStreamBlock {
         modulation.setup_weight_names(s);
     }
 
+
+    // def forward(self, x, vec):
+    //     # tensor [x] size: [2, 1882, 1024], min: -257.620056, max: 3559.283691, mean: 0.296953
+    //     # tensor [vec] size: [2, 1024], min: -0.274489, max: 5.098103, mean: 0.0289
+
+    //     mod_shift, mod_scale, mod_gate = self.modulation(vec)
+
+    //     x_mod = (mod_scale + 1.0) * self.pre_norm(x) + mod_shift
+    //     # x_mod.size() -- [2, 1874, 1024]
+
+    //     # self.linear1(x_mod).size() -- [2, 1874, 7168]
+    //     qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
+
+    //     # tensor [qkv] size: [2, 1882, 3072], min: -20.578125, max: 22.84375, mean: 0.003015
+    //     q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)  # self.num_heads == 16
+    //     # q, k, v is tuple: len = 3
+    //     #     tensor [item] size: [2, 16, 1882, 64], min: -12.992188, max: 14.09375, mean: -0.001616
+    //     #     tensor [item] size: [2, 16, 1882, 64], min: -17.484375, max: 22.84375, mean: 0.001019
+    //     #     tensor [item] size: [2, 16, 1882, 64], min: -20.578125, max: 20.78125, mean: 0.009641
+    //     # q, k = self.norm(q, k, v)
+    //     q = self.norm.query_norm(q)
+    //     k = self.norm.query_norm(k)
+
+    //     # compute attention
+    //     attn = attention(q, k, v)
+    //     # compute activation in mlp stream, cat again and run second linear layer
+
+    //     # attn.size() -- [2, 1874, 1024]
+    //     # self.mlp_act(mlp).size() -- [2, 1874, 4096]
+    //     output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), dim=2))
+    //     # output.size() -- [2, 1874, 1024]
+        
+    //     return x + mod_gate * output
+
+
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* vec) {
     	// please implement forward by your self, please !!!
+        std::vector<ggml_tensor *> mod = modulation.forward(ctx, vec); // mod_shift, mod_scale, mod_gate
+        ggml_tensor_t *mod_shift = mod[0];
+        ggml_tensor_t *mod_scale = mod[1];
+        ggml_tensor_t *mod_gate = mod[2];
+        mod_scale = ggml_add_constant(ctx, mod_scale, 1.0f);
+        ggml_tensor_t *x_mod = ggml_nn_mul_mat(ctx, mod_scale, pre_norm.forward(ctx, x));
+        x_mod = ggml_add(ctx, x_mod, mod_shift);
+        x_mod = linear1.forward(ctx, x_mod);
+        ggml_tensor_t *qkv = ggml_nn_slice(ctx, x_mod, 0/*dim*/, 0/*start*/, 3*hidden_size /*stop*/, 1/*step*/);
+        ggml_tensor_t *mlp = ggml_nn_slice(ctx, x_mod, 0/*dim*/, 3*hidden_size /*start*/, 3*hidden_size + mlp_hidden_dim /*stop*/,  1/*step*/);
 
+        ggml_tensor_t *q = ggml_nn_slice(ctx, qkv, 0/*dim*/, 0*hidden_size/*start*/, 1*hidden_size/*stop*/, 1/*step*/);
+        ggml_tensor_t *k = ggml_nn_slice(ctx, qkv, 0/*dim*/, 1*hidden_size/*start*/, 2*hidden_size/*stop*/, 1/*step*/);
+        ggml_tensor_t *v = ggml_nn_slice(ctx, qkv, 0/*dim*/, 2*hidden_size/*start*/, 3*hidden_size/*stop*/, 1/*step*/);
+        q = ggml_reshape_4d(ctx, q, head_dim, num_heads, 1882, 2); // [1024, 1882, 2] ==> [64, 16, 1882, 2] ==> [64. 1882, 16, 2]
+        q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));
+        ggml_tensor_dump("===> q", q);
+        k = ggml_reshape_4d(ctx, k, head_dim, num_heads, 1882, 2); // [1024, 1882, 2] ==> [64, 16, 1882, 2] ==> [64. 1882, 16, 2]
+        k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
+        ggml_tensor_dump("===> k", k);
+        v = ggml_reshape_4d(ctx, v, head_dim, num_heads, 1882, 2); // [1024, 1882, 2] ==> [64, 16, 1882, 2] ==> [64. 1882, 16, 2]
+        v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
+        ggml_tensor_dump("===> v", v);
+
+        q = norm.query_norm.forward(ctx, q);
+        k = norm.key_norm.forward(ctx, k);
+        ggml_tensor_t *attn = attention(ctx, q, k, v);
+        ggml_tensor_dump("===> attn", attn);
+
+        mlp = ggml_gelu(ctx, mlp);
+        ggml_tensor_t *out = ggml_concat(ctx, attn, mlp, 0/*dim*/);
+        out = linear2.forward(ctx, out);
+
+        out = ggml_nn_mul_mat(ctx, mod_gate, out);
+
+        x = ggml_add(ctx, x, out);
     	return x;
     }
 };
@@ -310,10 +454,29 @@ struct DoubleModulation {
         lin.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
+    // def forward(self, vec):
+    //     out = F.silu(vec)
 
-    	return x;
+    //     # tensor [out] size: [2, 1024], min: -0.118526, max: 5.067151, mean: 0.023684
+    //     out = self.lin(out)
+    //     # tensor [out] size: [2, 6144], min: -4.887924, max: 9.55643, mean: -0.091222
+
+    //     out = out[:, None, :] # size() -- [2, 1, 6144]
+    //     out = out.chunk(self.multiplier, dim=-1)
+    //     # len(out) == 6, ==> out[0].size() -- [2, 1, 1024]
+    //     return out[0], out[1], out[2], out[3], out[4], out[5] # shift, scale, gate; shift2, scale2, gate2
+
+    std::vector<ggml_tensor_t *> forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        ggml_tensor_t *out = ggml_silu(ctx, x);
+        out = lin.forward(ctx, out);
+
+        int C0 = (int)out->ne[0];
+        int C1 = (int)out->ne[1];
+
+        out = ggml_reshape_3d(ctx, out, C0, 1, C1);
+        ggml_tensor_dump("===> out", out);
+
+        return ggml_nn_chunks(ctx, out, 0/*dim*/, multiplier); // shift, scale, gate; shift2, scale2, gate2
     }
 };
 
@@ -426,10 +589,193 @@ struct DoubleStreamBlock {
         txt_mlp_2.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
+    // def forward(self, img, txt, vec):
+    //     # tensor [img] size: [2, 512, 1024], min: -7.316819, max: 7.774179, mean: -0.001382
+    //     # tensor [txt] size: [2, 1370, 1024], min: -143.35434, max: 155.169907, mean: -0.016531
+    //     # -------------------------------------------------------------------------------------
+    //     # tensor [vec] size: [2, 1024], min: -0.274489, max: 5.098103, mean: 0.0289
 
-    	return x;
+    //     #shift, scale, gate
+    //     img_mod1_shift, img_mod1_scale, img_mod1_gate, img_mod2_shift, img_mod2_scale, img_mod2_gate = self.img_mod(vec)
+    //     txt_mod1_shift, txt_mod1_scale, txt_mod1_gate, txt_mod2_shift, txt_mod2_scale, txt_mod2_gate = self.txt_mod(vec)
+
+    //     img_modulated = self.img_norm1(img)
+    //     img_modulated = (img_mod1_scale + 1.0) * img_modulated + img_mod1_shift
+
+    //     img_qkv = self.img_attn.qkv(img_modulated)
+
+    //     # self.num_heads -- 16
+    //     # tensor [img_qkv] size: [2, 512, 3072], min: -6.292969, max: 5.761719, mean: 0.01594
+    //     img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+    //     # img_q, img_k, img_v is tuple: len = 3
+    //     #     tensor [img_q] size: [2, 16, 512, 64], min: -24.125, max: 23.796875, mean: 0.132935
+    //     #     tensor [img_k] size: [2, 16, 512, 64], min: -28.15625, max: 28.09375, mean: 0.04367
+    //     #     tensor [img_v] size: [2, 16, 512, 64], min: -21.53125, max: 24.40625, mean: 0.032035
+
+    //     # img_q, img_k = self.img_attn.norm(img_q, img_k, img_v)
+    //     img_q = self.img_attn.norm.query_norm(img_q)
+    //     img_k = self.img_attn.norm.key_norm(img_k)
+
+    //     txt_modulated = self.txt_norm1(txt)
+    //     txt_modulated = (txt_mod1_scale + 1.0) * txt_modulated + txt_mod1_shift
+    //     txt_qkv = self.txt_attn.qkv(txt_modulated)
+    //     # tensor [txt_qkv] size: [2, 1370, 3072], min: -22.920546, max: 28.528749, mean: 0.004023
+
+    //     # 3070 = 3 * 16 * 64
+    //     txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+    //     # txt_q, txt_k, txt_v is tuple: len = 3
+    //     #     tensor [item] size: [2, 16, 1370, 64], min: -22.920546, max: 20.372944, mean: 0.026875
+    //     #     tensor [item] size: [2, 16, 1370, 64], min: -14.186515, max: 28.528749, mean: -0.022128
+    //     #     tensor [item] size: [2, 16, 1370, 64], min: -13.220157, max: 13.752945, mean: 0.007324
+
+    //     # txt_q2 = txt_qkv[:, :, 0000:1024] # [2, 1370, 1024] ==> [2, 1370, 16, 64] ==> [2, 16, 1370, 64]
+    //     # txt_k2 = txt_qkv[:, :, 1024:2048]
+    //     # txt_v2 = txt_qkv[:, :, 2048:3072]
+
+    //     # txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
+    //     txt_q = self.txt_attn.norm.query_norm(txt_q)
+    //     txt_k = self.txt_attn.norm.key_norm(txt_k)
+
+    // --------------------------------------------------------------------------------------
+    //     q = torch.cat((txt_q, img_q), dim=2) # [2, 16, 1370 + 512, 64] ==== [2, 16, 1882, 64]
+    //     k = torch.cat((txt_k, img_k), dim=2)
+    //     v = torch.cat((txt_v, img_v), dim=2)
+
+    //     attn = attention(q, k, v)
+    //     # tensor [attn] size: [2, 1882, 1024], min: -7.287106, max: 8.247703, mean: 0.012221
+
+
+
+    //     # txt.shape -- [2, 1370, 1024]
+    //     txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1] :]
+    //     # txt_attn.size() -- [2, 1370, 1024]
+    //     # img_attn.size() -- [2, 512, 1024]
+
+    //     img = img + img_mod1_gate * self.img_attn.proj(img_attn)
+    //     img = img + img_mod2_gate * self.img_mlp((img_mod2_scale + 1.0) * self.img_norm2(img) + img_mod2_shift)
+
+    //     txt = txt + txt_mod1_gate * self.txt_attn.proj(txt_attn)
+    //     txt = txt + txt_mod2_gate * self.txt_mlp((txt_mod2_scale + 1.0) * self.txt_norm2(txt) + txt_mod2_shift)
+
+    //     # tensor [img] size: [2, 512, 1024], min: -37.988338, max: 7.773553, mean: -0.055882
+    //     # tensor [txt] size: [2, 1370, 1024], min: -200.23848, max: 215.347946, mean: -0.12639
+    //     assert img.size(1) == 512
+    //     # assert txt.size(1) == 1370
+
+    //     # return img, txt # torch.cat((img, txt), dim=1) #==> [2, 1882, 1024]
+    //     return torch.cat((img, txt), dim=1) # [2, 1882, 1024]
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* img, ggml_tensor_t* txt, ggml_tensor_t* vec) {
+        // shift, scale, gate
+        std::vector<ggml_tensor_t *> img_mods = img_mod.forward(ctx, vec);
+        ggml_tensor_t *img_mod1_shift = img_mods[0];
+        ggml_tensor_t *img_mod1_scale = img_mods[1];
+        ggml_tensor_t *img_mod1_gate = img_mods[2];
+        ggml_tensor_t *img_mod2_shift = img_mods[3];
+        ggml_tensor_t *img_mod2_scale = img_mods[4];
+        ggml_tensor_t *img_mod2_gate =  img_mods[5];
+        // ----------------------------------------------------------------
+        std::vector<ggml_tensor_t *> txt_mods = txt_mod.forward(ctx, vec);
+        ggml_tensor_t *txt_mod1_shift = txt_mods[0];
+        ggml_tensor_t *txt_mod1_scale = txt_mods[1];
+        ggml_tensor_t *txt_mod1_gate = txt_mods[2];
+        ggml_tensor_t *txt_mod2_shift = txt_mods[3];
+        ggml_tensor_t *txt_mod2_scale = txt_mods[4];
+        ggml_tensor_t *txt_mod2_gate = txt_mods[5];
+        // ----------------------------------------------------------------
+
+        ggml_tensor_t *img_modulated = img_norm1.forward(ctx, img);
+        img_mod1_scale = ggml_add_constant(ctx, img_mod1_scale, 1.0f);
+        img_modulated = ggml_nn_mul_mat(ctx, img_mod1_scale, img_modulated);
+        ggml_tensor_t *img_qkv = img_attn.qkv.forward(ctx, img_modulated);
+
+
+        ggml_tensor_t *img_q = ggml_nn_slice(ctx, img_qkv, 0/*dim*/, 0*hidden_size/*start*/, 1*hidden_size/*stop*/, 1/*step*/);
+        ggml_tensor_t *img_k = ggml_nn_slice(ctx, img_qkv, 0/*dim*/, 1*hidden_size/*start*/, 2*hidden_size/*stop*/, 1/*step*/);
+        ggml_tensor_t *img_v = ggml_nn_slice(ctx, img_qkv, 0/*dim*/, 2*hidden_size/*start*/, 3*hidden_size/*stop*/, 1/*step*/);
+
+        // const int num_heads = 16;
+        // [1024, 512, 2] ==> [64, 16, 512, 2] ==> [64, 512, 16, 2]
+        img_q = ggml_reshape_4d(ctx, img_q, (int)img_q->ne[1]/num_heads, num_heads, (int)img_q->ne[1], (int)img_q->ne[2]);
+        img_k = ggml_reshape_4d(ctx, img_k, (int)img_k->ne[1]/num_heads, num_heads, (int)img_k->ne[1], (int)img_k->ne[2]);
+        img_v = ggml_reshape_4d(ctx, img_v, (int)img_v->ne[1]/num_heads, num_heads, (int)img_v->ne[1], (int)img_v->ne[2]);
+
+        ggml_tensor_dump("===> img_q", img_q);
+        ggml_tensor_dump("===> img_k", img_k);
+        ggml_tensor_dump("===> img_v", img_v);
+
+        img_q = img_attn.norm.query_norm.forward(ctx, img_q);
+        img_k = img_attn.norm.key_norm.forward(ctx, img_k);
+        // -----------------------------------------------------------------------------
+
+        ggml_tensor_t *txt_modulated = txt_norm1.forward(ctx, txt);
+        txt_mod1_scale = ggml_add_constant(ctx, txt_mod1_scale, 1.0f);
+        txt_modulated = ggml_nn_mul_mat(ctx, txt_mod1_scale, txt_modulated);
+        txt_modulated = ggml_add(ctx, txt_modulated, txt_mod1_shift);
+        ggml_tensor_t *txt_qkv = txt_attn.qkv.forward(ctx, txt_modulated);
+        ggml_tensor_t *txt_q = ggml_nn_slice(ctx, txt_qkv, 0/*dim*/, 0*hidden_size/*start*/, 1*hidden_size/*stop*/, 1/*step*/);
+        ggml_tensor_t *txt_k = ggml_nn_slice(ctx, txt_qkv, 0/*dim*/, 1*hidden_size/*start*/, 2*hidden_size/*stop*/, 1/*step*/);
+        ggml_tensor_t *txt_v = ggml_nn_slice(ctx, txt_qkv, 0/*dim*/, 2*hidden_size/*start*/, 3*hidden_size/*stop*/, 1/*step*/);
+
+        txt_q = ggml_reshape_4d(ctx, txt_q, (int)txt_q->ne[1]/num_heads, num_heads, (int)txt_q->ne[1], (int)txt_q->ne[2]);
+        txt_k = ggml_reshape_4d(ctx, txt_k, (int)txt_k->ne[1]/num_heads, num_heads, (int)txt_k->ne[1], (int)txt_k->ne[2]);
+        txt_v = ggml_reshape_4d(ctx, txt_v, (int)txt_v->ne[1]/num_heads, num_heads, (int)txt_v->ne[1], (int)txt_v->ne[2]);
+
+        ggml_tensor_dump("===> txt_q", txt_q);
+        ggml_tensor_dump("===> txt_k", txt_k);
+        ggml_tensor_dump("===> txt_v", txt_v);
+
+        txt_q = txt_attn.norm.query_norm.forward(ctx, txt_q);
+        txt_k = txt_attn.norm.key_norm.forward(ctx, txt_k);
+
+        ggml_tensor_t *q = ggml_concat(ctx, txt_q, img_q, 1/*dim*/);
+        ggml_tensor_t *k = ggml_concat(ctx, txt_k, img_k, 1/*dim*/);
+        ggml_tensor_t *v = ggml_concat(ctx, txt_v, img_v, 1/*dim*/);
+        ggml_tensor_t *attn = attention(ctx, q, k, v);
+        ggml_tensor_dump("===> attn 10", attn);
+
+        int S = (int)txt->ne[1];
+        ggml_tensor_t *txt_attn2 = ggml_nn_slice(ctx, attn, 1/*dim*/, 0/*start*/, S/*stop*/, 1/*step*/);
+        ggml_tensor_t *img_attn2 = ggml_nn_slice(ctx, attn, 1/*dim*/, S/*start*/, (int)attn->ne[1]/*stop*/, 1/*step*/);
+        ggml_tensor_dump("===> txt_attn2", txt_attn2);
+        ggml_tensor_dump("===> img_attn2", img_attn2);
+
+
+        img_mod1_gate = ggml_nn_mul_mat(ctx, img_mod1_gate, img_attn.forward(ctx, img_attn2));
+        img = ggml_add(ctx, img, img_mod1_gate);
+
+        img_mod2_scale = ggml_add_constant(ctx, img_mod2_scale, 1.0f);
+        img_mod2_scale = ggml_nn_mul_mat(ctx, img_mod2_scale, img_norm2.forward(ctx, img));
+        img_mod2_scale = ggml_add(ctx, img_mod2_scale, img_mod2_shift);
+        img_mod2_gate = ggml_nn_mul_mat(ctx, img_mod2_gate, img_mod2_scale);
+        img = ggml_add(ctx, img, img_mod2_gate);
+
+        txt_attn2 = txt_attn.proj.forward(ctx, txt_attn2);
+        txt_mod1_gate = ggml_nn_mul_mat(ctx, txt_mod1_gate, txt_attn2);
+        txt = ggml_add(ctx, txt, txt_mod1_gate);
+
+
+        //     txt = txt + txt_mod2_gate * self.txt_mlp((txt_mod2_scale + 1.0) * self.txt_norm2(txt) + txt_mod2_shift)
+        txt_mod2_scale = ggml_add_constant(ctx, txt_mod2_scale, 1.0f);
+        txt_mod2_scale = ggml_nn_mul_mat(ctx, txt_mod2_scale, txt_norm2.forward(ctx, txt));
+        txt_mod2_scale = ggml_add(ctx, txt_mod2_scale, txt_mod2_shift);
+
+        // self.txt_mlp = nn.Sequential(
+        //     nn.Linear(hidden_size, mlp_hidden_dim, bias=True),
+        //     GELU(approximate="tanh"),
+        //     nn.Linear(mlp_hidden_dim, hidden_size, bias=True),
+        // )
+        txt_mod2_scale = txt_mlp_0.forward(ctx, txt_mod2_scale);
+        txt_mod2_scale = ggml_gelu(ctx, txt_mod2_scale);
+        txt_mod2_scale = txt_mlp_2.forward(ctx, txt_mod2_scale);
+
+        txt_mod2_gate = ggml_nn_mul_mat(ctx, txt_mod2_gate, txt_mod2_scale);
+        txt = ggml_add(ctx, txt, txt_mod2_gate);
+
+        ggml_tensor_t *out = ggml_concat(ctx, img, txt, 1/*dim*/);
+
+        ggml_tensor_dump("===> out", out);
+        return out;
     }
 };
 
@@ -479,7 +825,7 @@ struct Hunyuan3DDiT {
     const int num_heads = 16;
     // const int depth = 8;
     // const int depth_single_blocks = 16;
-    const int time_factor = 1000;
+    const float time_factor = 1000.0f;
 
     // network params
     struct Linear latent_in;
@@ -588,21 +934,28 @@ struct Hunyuan3DDiT {
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* t, ggml_tensor_t* cond) {
         ggml_tensor_t *latent = latent_in.forward(ctx, x);
-        ggml_tensor_t *vec; //  = timestep_embedding.forward(ctx, t, 256, time_factor);
+        ggml_tensor_t *vec = timestep_embedding(ctx, t, 256, time_factor);
         vec = time_in.forward(ctx, vec);
         cond = cond_in.forward(ctx, cond);
 
+        ggml_tensor_t *latent_cond;
         // for block in self.double_blocks:  # len(self.double_blocks) === 8
         //     latent, cond = block(img=latent, txt=cond, vec=vec)
+        for (int i = 0; i < 8; i++) {
+            latent_cond = double_blocks[i].forward(ctx, latent, cond, vec);
+            // latent = latent_cond[:, 0:512, :] # img ...
+            // cond = latent_cond[:, 512: -1, :] # // text
+            latent = ggml_nn_slice(ctx, latent_cond, 1/*dim*/, 0/*start*/, 512/*stop*/, 1/*step*/);
+            cond = ggml_nn_slice(ctx, latent_cond, 1/*dim*/, 512/*start*/, (int)latent_cond->ne[1]/*stop*/, 1/*step*/);
+        }
+
         latent = ggml_concat(ctx, cond, latent, 1/*dim*/);
 
         for (int i = 0; i < 16; i++) {
             latent = single_blocks[i].forward(ctx, latent, vec);
         }
 
-        int S = (int)cond->ne[1];
-        latent = ggml_nn_slice(ctx, latent, 1 /*dim*/, 0 /*start*/, S /*stop*/, 1 /*step*/);
-
+        latent = ggml_nn_slice(ctx, latent, 1 /*dim*/, 0 /*start*/, (int)cond->ne[1] /*stop*/, 1 /*step*/);
         latent = final_layer.forward(ctx, latent, vec);
 
     	return latent;

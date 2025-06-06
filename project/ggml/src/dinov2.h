@@ -7,7 +7,9 @@
 
 
 ggml_tensor_t* scaled_dot_product_attention(struct ggml_context* ctx, 
-    ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value, float scale) {
+    ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value) {
+
+    float scale = 1.0f/sqrtf((float)query->ne[0]);
     key = ggml_cont(ctx, ggml_permute(ctx, key, 1, 0, 2, 3)); // [64, 1370, 24, 1]  --> [1370, 64, 24, 1]
 
     ggml_tensor_t *attn_weight = ggml_nn_mul_mat(ctx, query, key);
@@ -19,13 +21,12 @@ ggml_tensor_t* scaled_dot_product_attention(struct ggml_context* ctx,
     return new_value; // f32 [64, 1370, 24, 1], 
 }
 
-ggml_tensor_t* sdpa_attention_forward(struct ggml_context* ctx, 
-    ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value, float scale) {
+ggml_tensor_t* sdpa_attention_forward(struct ggml_context* ctx, ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value) {
     query = ggml_cont(ctx, query);
     key = ggml_cont(ctx, key);
     value = ggml_cont(ctx, value);
 
-    ggml_tensor_t *attn_output = scaled_dot_product_attention(ctx, query, key, value, scale);
+    ggml_tensor_t *attn_output = scaled_dot_product_attention(ctx, query, key, value);
     attn_output = ggml_cont(ctx, ggml_permute(ctx, attn_output, 0, 2, 1, 3)); // [64, 1370, 24, 1] --> [64, 24, 1370, 1]
     return attn_output;
 }
@@ -172,7 +173,7 @@ struct Dinov2SelfAttention {
         ggml_tensor_t *query_layer = transpose_for_scores(ctx, query.forward(ctx, x));
         ggml_tensor_t *value_layer = transpose_for_scores(ctx, value.forward(ctx, x));
 
-        ggml_tensor_t *context_layer = sdpa_attention_forward(ctx, query_layer, key_layer, value_layer, scaling);
+        ggml_tensor_t *context_layer = sdpa_attention_forward(ctx, query_layer, key_layer, value_layer);
 
         int W = (int)context_layer->ne[0];
         int H = (int)context_layer->ne[1];
