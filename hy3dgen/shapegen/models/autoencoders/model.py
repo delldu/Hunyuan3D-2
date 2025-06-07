@@ -22,7 +22,7 @@ from .attention_blocks import FourierEmbedder, Transformer, CrossAttentionDecode
 from .surface_extractors import MCSurfaceExtractor, SurfaceExtractors
 from .volume_decoders import VanillaVolumeDecoder, FlashVDMVolumeDecoding, HierarchicalVolumeDecoding
 from ...utils import logger, synchronize_timer, smart_load_model
-
+import pdb
 
 class VectsetVAE(nn.Module):
 

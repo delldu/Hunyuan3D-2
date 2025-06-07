@@ -184,6 +184,7 @@ def to_rgb_image(maybe_rgba: Image.Image):
         rgba = maybe_rgba
         img = numpy.random.randint(127, 128, size=[rgba.size[1], rgba.size[0], 3], dtype=numpy.uint8)
         img = Image.fromarray(img, 'RGB')
+        # img -- <PIL.Image.Image image mode=RGB size=512x512 at 0x7F3977447C80>
         img.paste(rgba, mask=rgba.getchannel('A'))
         return img
     else:
@@ -230,7 +231,9 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
     @torch.no_grad()
     def encode_images(self, images):
         B = images.shape[0]
+        # tensor [images] size: [1, 1, 3, 512, 512], min: 0.0, max: 1.0, mean: 0.507297
         images = rearrange(images, 'b n c h w -> (b n) c h w')
+        # tensor [images] size: [1, 3, 512, 512], min: 0.0, max: 1.0, mean: 0.507297
 
         dtype = next(self.vae.parameters()).dtype
         images = (images - 0.5) * 2.0

@@ -26,6 +26,8 @@ from .utils.dehighlight_utils import Light_Shadow_Remover
 from .utils.multiview_utils import Multiview_Diffusion_Net
 from .utils.imagesuper_utils import Image_Super_Net
 from .utils.uv_warp_utils import mesh_uv_wrap
+import todos
+import pdb
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,10 @@ logger = logging.getLogger(__name__)
 class Hunyuan3DTexGenConfig:
 
     def __init__(self, light_remover_ckpt_path, multiview_ckpt_path, subfolder_name):
+        # light_remover_ckpt_path = './tencent/Hunyuan3D-2/hunyuan3d-delight-v2-0'
+        # multiview_ckpt_path = './tencent/Hunyuan3D-2/hunyuan3d-paint-v2-0-turbo'
+        # subfolder_name = 'hunyuan3d-paint-v2-0-turbo'
+
         self.device = 'cuda'
         self.light_remover_ckpt_path = light_remover_ckpt_path
         self.multiview_ckpt_path = multiview_ckpt_path
@@ -48,21 +54,28 @@ class Hunyuan3DTexGenConfig:
 
         self.pipe_dict = {'hunyuan3d-paint-v2-0': 'hunyuanpaint', 'hunyuan3d-paint-v2-0-turbo': 'hunyuanpaint-turbo'}
         self.pipe_name = self.pipe_dict[subfolder_name]
-
+        #pdb.set_trace()
 
 class Hunyuan3DPaintPipeline:
     @classmethod
     def from_pretrained(cls, model_path, subfolder='hunyuan3d-paint-v2-0-turbo'):
+        # model_path = './tencent/Hunyuan3D-2'
+        # subfolder = 'hunyuan3d-paint-v2-0-turbo'
+
         original_model_path = model_path
-        if not os.path.exists(model_path):
+
+        if os.path.exists(model_path):
             # try local path
-            base_dir = os.environ.get('HY3DGEN_MODELS', '~/.cache/hy3dgen')
+            base_dir = os.environ.get('HY3DGEN_MODELS', '')
             model_path = os.path.expanduser(os.path.join(base_dir, model_path))
 
             delight_model_path = os.path.join(model_path, 'hunyuan3d-delight-v2-0')
-            multiview_model_path = os.path.join(model_path, subfolder)
+            # './tencent/Hunyuan3D-2/hunyuan3d-delight-v2-0'
 
-            if not os.path.exists(delight_model_path) or not os.path.exists(multiview_model_path):
+            multiview_model_path = os.path.join(model_path, subfolder)
+            # './tencent/Hunyuan3D-2/hunyuan3d-paint-v2-0-turbo'
+
+            if not os.path.exists(delight_model_path) or not os.path.exists(multiview_model_path): # False
                 try:
                     import huggingface_hub
                     # download from huggingface
@@ -98,12 +111,13 @@ class Hunyuan3DPaintPipeline:
         # empty cude cache
         torch.cuda.empty_cache()
         # Load model
-        self.models['delight_model'] = Light_Shadow_Remover(self.config)
+        # self.models['delight_model'] = Light_Shadow_Remover(self.config)
+        # pdb.set_trace()
         self.models['multiview_model'] = Multiview_Diffusion_Net(self.config)
         # self.models['super_model'] = Image_Super_Net(self.config)
 
     def enable_model_cpu_offload(self, gpu_id: Optional[int] = None, device: Union[torch.device, str] = "cuda"):
-        self.models['delight_model'].pipeline.enable_model_cpu_offload(gpu_id=gpu_id, device=device)
+        # self.models['delight_model'].pipeline.enable_model_cpu_offload(gpu_id=gpu_id, device=device)
         self.models['multiview_model'].pipeline.enable_model_cpu_offload(gpu_id=gpu_id, device=device)
 
     def render_normal_multiview(self, camera_elevs, camera_azims, use_abs_coor=True):
@@ -201,7 +215,7 @@ class Hunyuan3DPaintPipeline:
             
         images_prompt = [self.recenter_image(image_prompt) for image_prompt in images_prompt]
 
-        images_prompt = [self.models['delight_model'](image_prompt) for image_prompt in images_prompt]
+        # images_prompt = [self.models['delight_model'](image_prompt) for image_prompt in images_prompt]
 
         mesh = mesh_uv_wrap(mesh)
 

@@ -30,7 +30,8 @@ from tqdm import tqdm
 from .models.autoencoders import ShapeVAE
 from .models.autoencoders import SurfaceExtractors
 from .utils import logger, synchronize_timer, smart_load_model
-
+import todos
+import pdb
 
 def retrieve_timesteps(
     scheduler,
@@ -419,6 +420,7 @@ class Hunyuan3DDiTPipeline:
     def encode_cond(self, image, additional_cond_inputs, do_classifier_free_guidance, dual_guidance):
         bsz = image.shape[0]
         cond = self.conditioner(image=image, **additional_cond_inputs)
+        # self.conditioner -- SingleImageEncoder
 
         if do_classifier_free_guidance:
             un_cond = self.conditioner.unconditional_embedding(bsz, **additional_cond_inputs)
@@ -614,7 +616,7 @@ class Hunyuan3DDiTPipeline:
                 noise_pred = self.model(latent_model_input, timestep_tensor, cond, guidance_cond=guidance_cond)
 
                 # no drop, drop clip, all drop
-                if do_classifier_free_guidance:
+                if do_classifier_free_guidance: # False
                     if dual_guidance:
                         noise_pred_clip, noise_pred_dino, noise_pred_uncond = noise_pred.chunk(3)
                         noise_pred = (
@@ -693,6 +695,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
         enable_pbar=True,
         **kwargs,
     ) -> List[List[trimesh.Trimesh]]:
+        # image.keys() -- ['front', 'left', 'back']
         callback = kwargs.pop("callback", None)
         callback_steps = kwargs.pop("callback_steps", None)
 
@@ -703,10 +706,19 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
         do_classifier_free_guidance = guidance_scale >= 0 and not (
             hasattr(self.model, 'guidance_embed') and
             self.model.guidance_embed is True
-        )
+        ) # False
 
         cond_inputs = self.prepare_image(image)
+        # cond_inputs is dict:
+        #     tensor [image] size: [1, 3, 3, 512, 512], min: -0.85098, max: 1.0, mean: 0.866906
+        #     tensor [mask] size: [1, 3, 1, 512, 512], min: -1.0, max: 1.0, mean: -0.538101
+        #     [view_idxs] type: <class 'list'>
+
         image = cond_inputs.pop('image')
+        # image is dict:
+        #     [front] type: <class 'PIL.Image.Image'>
+        #     [left] type: <class 'PIL.Image.Image'>
+        #     [back] type: <class 'PIL.Image.Image'>
         cond = self.encode_cond(
             image=image,
             additional_cond_inputs=cond_inputs,
@@ -718,13 +730,16 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
         # 5. Prepare timesteps
         # NOTE: this is slightly different from common usage, we start from 0.
         sigmas = np.linspace(0, 1, num_inference_steps) if sigmas is None else sigmas
+        #  sigmas -- array([0.  , 0.25, 0.5 , 0.75, 1.  ])
+
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler,
-            num_inference_steps,
+            num_inference_steps, # 5
             device,
             sigmas=sigmas,
         )
         latents = self.prepare_latents(batch_size, dtype, device, generator)
+        # tensor [latents] size: [1, 3072, 64], min: -3.896484, max: 3.896484, mean: 0.001157
 
         guidance = None
         if hasattr(self.model, 'guidance_embed') and \
@@ -732,6 +747,87 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             guidance = torch.tensor([guidance_scale] * batch_size, device=device, dtype=dtype)
             # logger.info(f'Using guidance embed with scale {guidance_scale}')
 
+
+        # (Pdb) self.model
+        # Hunyuan3DDiT(
+        #   (latent_in): Linear(in_features=64, out_features=1024, bias=True)
+        #   (time_in): MLPEmbedder(
+        #     (in_layer): Linear(in_features=256, out_features=1024, bias=True)
+        #     (silu): SiLU()
+        #     (out_layer): Linear(in_features=1024, out_features=1024, bias=True)
+        #   )
+        #   (cond_in): Linear(in_features=1536, out_features=1024, bias=True)
+        #   (guidance_in): MLPEmbedder(
+        #     (in_layer): Linear(in_features=256, out_features=1024, bias=True)
+        #     (silu): SiLU()
+        #     (out_layer): Linear(in_features=1024, out_features=1024, bias=True)
+        #   )
+        #   (double_blocks): ModuleList(
+        #     (0-15): 16 x DoubleStreamBlock(
+        #       (img_mod): Modulation(
+        #         (lin): Linear(in_features=1024, out_features=6144, bias=True)
+        #       )
+        #       (img_norm1): LayerNorm((1024,), eps=1e-06, elementwise_affine=False)
+        #       (img_attn): SelfAttention(
+        #         (qkv): Linear(in_features=1024, out_features=3072, bias=True)
+        #         (norm): QKNorm(
+        #           (query_norm): RMSNorm()
+        #           (key_norm): RMSNorm()
+        #         )
+        #         (proj): Linear(in_features=1024, out_features=1024, bias=True)
+        #       )
+        #       (img_norm2): LayerNorm((1024,), eps=1e-06, elementwise_affine=False)
+        #       (img_mlp): Sequential(
+        #         (0): Linear(in_features=1024, out_features=4096, bias=True)
+        #         (1): GELU()
+        #         (2): Linear(in_features=4096, out_features=1024, bias=True)
+        #       )
+        #       (txt_mod): Modulation(
+        #         (lin): Linear(in_features=1024, out_features=6144, bias=True)
+        #       )
+        #       (txt_norm1): LayerNorm((1024,), eps=1e-06, elementwise_affine=False)
+        #       (txt_attn): SelfAttention(
+        #         (qkv): Linear(in_features=1024, out_features=3072, bias=True)
+        #         (norm): QKNorm(
+        #           (query_norm): RMSNorm()
+        #           (key_norm): RMSNorm()
+        #         )
+        #         (proj): Linear(in_features=1024, out_features=1024, bias=True)
+        #       )
+        #       (txt_norm2): LayerNorm((1024,), eps=1e-06, elementwise_affine=False)
+        #       (txt_mlp): Sequential(
+        #         (0): Linear(in_features=1024, out_features=4096, bias=True)
+        #         (1): GELU()
+        #         (2): Linear(in_features=4096, out_features=1024, bias=True)
+        #       )
+        #     )
+        #   )
+        #   (single_blocks): ModuleList(
+        #     (0-31): 32 x SingleStreamBlock(
+        #       (linear1): Linear(in_features=1024, out_features=7168, bias=True)
+        #       (linear2): Linear(in_features=5120, out_features=1024, bias=True)
+        #       (norm): QKNorm(
+        #         (query_norm): RMSNorm()
+        #         (key_norm): RMSNorm()
+        #       )
+        #       (pre_norm): LayerNorm((1024,), eps=1e-06, elementwise_affine=False)
+        #       (mlp_act): GELU()
+        #       (modulation): Modulation(
+        #         (lin): Linear(in_features=1024, out_features=3072, bias=True)
+        #       )
+        #     )
+        #   )
+        #   (final_layer): LastLayer(
+        #     (norm_final): LayerNorm((1024,), eps=1e-06, elementwise_affine=False)
+        #     (linear): Linear(in_features=1024, out_features=64, bias=True)
+        #     (adaLN_modulation): Sequential(
+        #       (0): SiLU()
+        #       (1): Linear(in_features=1024, out_features=2048, bias=True)
+        #     )
+        #   )
+        # )
+
+        # guidance -- tensor([5.], device='cuda:0', dtype=torch.float16)
         with synchronize_timer('Diffusion Sampling'):
             for i, t in enumerate(tqdm(timesteps, disable=not enable_pbar, desc="Diffusion Sampling:")):
                 # expand the latents if we are doing classifier free guidance
@@ -745,7 +841,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                     latents.dtype) / self.scheduler.config.num_train_timesteps
                 noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
 
-                if do_classifier_free_guidance:
+                if do_classifier_free_guidance: # False
                     noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
 

@@ -20,7 +20,8 @@ import torch
 from typing import List
 from diffusers import DiffusionPipeline
 from diffusers import EulerAncestralDiscreteScheduler, LCMScheduler
-
+import todos
+import pdb
 
 class Multiview_Diffusion_Net():
     def __init__(self, config) -> None:
@@ -54,6 +55,9 @@ class Multiview_Diffusion_Net():
         os.environ["PL_GLOBAL_SEED"] = str(seed)
 
     def __call__(self, input_images, control_images, camera_info):
+        todos.debug.output_var("input_images", input_images)
+        todos.debug.output_var("control_images", control_images)
+        todos.debug.output_var("camera_info", camera_info)
 
         self.seed_everything(0)
 
@@ -82,6 +86,12 @@ class Multiview_Diffusion_Net():
         kwargs["normal_imgs"] = normal_image
         kwargs["position_imgs"] = position_image
 
+        todos.debug.output_var("input_images", input_images)
+        todos.debug.output_var("kwargs", kwargs)
+
         mvd_image = self.pipeline(input_images, num_inference_steps=30, **kwargs).images
 
+        todos.debug.output_var("mvd_image", mvd_image)
+
+        #pdb.set_trace()
         return mvd_image
