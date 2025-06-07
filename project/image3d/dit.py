@@ -202,6 +202,7 @@ class DoubleModulation(nn.Module):
         out = out[:, None, :] # size() -- [2, 1, 6144]
         out = out.chunk(self.multiplier, dim=-1)
         # len(out) == 6, ==> out[0].size() -- [2, 1, 1024]
+
         return out[0], out[1], out[2], out[3], out[4], out[5] # shift, scale, gate; shift, scale2, gate2
 
 class DoubleStreamBlock(nn.Module):
@@ -248,6 +249,10 @@ class DoubleStreamBlock(nn.Module):
         txt_mod1_shift, txt_mod1_scale, txt_mod1_gate, txt_mod2_shift, txt_mod2_scale, txt_mod2_gate = self.txt_mod(vec)
 
         img_modulated = self.img_norm1(img)
+        # img_mod1_scale.size() -- [2, 1, 1024]
+        # img_modulated.size() -- [2, 512, 1024]
+        # (img_mod1_scale * img_modulated).size() # ==> [2, 512, 1024]
+
         img_modulated = (img_mod1_scale + 1.0) * img_modulated + img_mod1_shift
 
         img_qkv = self.img_attn.qkv(img_modulated)
@@ -342,8 +347,9 @@ class SingleStreamBlock(nn.Module):
         self.modulation = SingleModulation(hidden_size)
 
     def forward(self, x, vec):
-        # tensor [x] size: [2, 1882, 1024], min: -257.620056, max: 3559.283691, mean: 0.296953
-        # tensor [vec] size: [2, 1024], min: -0.274489, max: 5.098103, mean: 0.0289
+        # (x, vec) is tuple: len = 2
+        #     tensor [item] size: [2, 1874, 1024], min: -253.655716, max: 3577.827637, mean: 0.296983
+        #     tensor [item] size: [2, 1024], min: -0.274489, max: 5.098103, mean: 0.0289
 
         mod_shift, mod_scale, mod_gate = self.modulation(vec)
 
@@ -353,21 +359,23 @@ class SingleStreamBlock(nn.Module):
         # self.linear1(x_mod).size() -- [2, 1874, 7168]
         qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
-        # tensor [qkv] size: [2, 1882, 3072], min: -20.578125, max: 22.84375, mean: 0.003015
+        # tensor [qkv] size: [2, 1874, 3072], min: -20.578125, max: 22.84375, mean: 0.003015
         q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)  # self.num_heads == 16
-        # q, k, v is tuple: len = 3
-        #     tensor [item] size: [2, 16, 1882, 64], min: -12.992188, max: 14.09375, mean: -0.001616
-        #     tensor [item] size: [2, 16, 1882, 64], min: -17.484375, max: 22.84375, mean: 0.001019
-        #     tensor [item] size: [2, 16, 1882, 64], min: -20.578125, max: 20.78125, mean: 0.009641
+        # (q, k, v) is tuple: len = 3
+        #     tensor [item] size: [2, 16, 1874, 64], min: -12.468342, max: 14.249011, mean: -0.00277
+        #     tensor [item] size: [2, 16, 1874, 64], min: -17.489941, max: 22.73539, mean: -0.001002
+        #     tensor [item] size: [2, 16, 1874, 64], min: -20.703197, max: 20.764069, mean: 0.0097
+
         # q, k = self.norm(q, k, v)
-        q = self.norm.query_norm(q)
-        k = self.norm.query_norm(k)
+        q = self.norm.query_norm(q) # size() -- [2, 16, 1874, 64]
+        k = self.norm.query_norm(k) # size() -- [2, 16, 1874, 64]
+        # v.size() -- [2, 16, 1874, 64]
 
         # compute attention
         attn = attention(q, k, v)
         # compute activation in mlp stream, cat again and run second linear layer
+        # tensor [attn] size: [2, 1874, 1024], min: -20.535616, max: 20.183136, mean: 0.003219
 
-        # attn.size() -- [2, 1874, 1024]
         # self.mlp_act(mlp).size() -- [2, 1874, 4096]
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), dim=2))
         # output.size() -- [2, 1874, 1024]
@@ -458,20 +466,29 @@ class Hunyuan3DDiT(nn.Module):
         # tensor [cond] size: [2, 1370, 1024], min: -143.375, max: 155.125, mean: -0.016774
 
         for block in self.double_blocks:  # len(self.double_blocks) === 8
-            latent_cond = block(img=latent, txt=cond, vec=vec)
-            latent = latent_cond[:, 0:512, :] # img ...
-            cond = latent_cond[:, 512: -1, :] # // text
+            latent_cond = block(img=latent, txt=cond, vec=vec) # size() -- [2, 1875, 1024]
+            # tensor [latent_cond] size: [2, 1882, 1024], min: -200.250443, max: 215.751953, mean: -0.096737
+            # tensor [latent_cond] size: [2, 1881, 1024], min: -220.99881, max: 249.201691, mean: -0.100886
+            # tensor [latent_cond] size: [2, 1880, 1024], min: -232.755768, max: 269.921753, mean: -0.117555
+            # tensor [latent_cond] size: [2, 1879, 1024], min: -231.568756, max: 282.909821, mean: -0.127666
+            # tensor [latent_cond] size: [2, 1878, 1024], min: -219.082016, max: 281.47818, mean: -0.122315
+            # tensor [latent_cond] size: [2, 1877, 1024], min: -219.760513, max: 257.395721, mean: -0.128274
+            # tensor [latent_cond] size: [2, 1876, 1024], min: -244.050018, max: 121.036133, mean: -0.115158
+            # tensor [latent_cond] size: [2, 1875, 1024], min: -255.033554, max: 3575.796387, mean: 0.304856
 
-        # tensor [cond] size: [2, 1370, 1024], min: -263.0, max: 3560.0, mean: 0.430395
+            latent = latent_cond[:, 0:512, :] # img ... , size() -- [2, 512, 1024]
+            cond = latent_cond[:, 512: -1, :] # // text, size() -- [2, 1362, 1024]
+
+        # tensor [cond] size: [2, 1362, 1024], min: -263.0, max: 3560.0, mean: 0.430395
         # tensor [latent] size: [2, 512, 1024], min: -93.375, max: 106.9375, mean: -0.064714
         latent = torch.cat((cond, latent), dim=1)
-        # tensor [latent] size: [2, 1882, 1024], min: -263.0, max: 3560.0, mean: 0.2957
+        # tensor [latent] size: [2, 1874, 1024], min: -263.0, max: 3560.0, mean: 0.2957
 
         for block in self.single_blocks:  # len(self.single_blocks) === 16
             latent = block(latent, vec=vec)
 
-        #tensor [latent] size: [2, 512, 1024], min: -63.13076, max: 204.695984, mean: -0.015609
-        # tensor [cond] size: [2, 1370, 1024], min: -254.556458, max: 3557.766602, mean: 0.409183
+        # latent.size() -- [2, 1874, 1024]
+        # cond.size() -- [2, 1362, 1024]
 
         latent = latent[:, cond.shape[1] :, ...]
         # tensor [latent] size: [2, 512, 1024], min: -64.3125, max: 203.875, mean: -0.013699

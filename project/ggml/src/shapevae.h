@@ -147,25 +147,37 @@ struct QKVMultiheadCrossAttention {
     //     kv = kv.view(bs, n_kv, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
         q = ggml_reshape_4d(ctx, q, -1, heads, n_q, bs);
         kv = ggml_reshape_4d(ctx, kv, -1, heads, n_kv, bs);
-        int S = (int)kv->ne[0]; // 64
+        int S = (int)kv->ne[0]/2; // 64
         ggml_tensor_t *k = ggml_nn_slice(ctx, kv, 0/*dim*/, 0*S/*start*/, 1*S/*stop*/, 1);
         ggml_tensor_t *v = ggml_nn_slice(ctx, kv, 0/*dim*/, 1*S/*start*/, 2*S/*stop*/, 1);
         q = q_norm.forward(ctx, q);
         k = q_norm.forward(ctx, k);
-        // ----------------------------------------------------------------------------------------
-        q = ggml_permute(ctx, q, 0, 2, 1, 3);
-        k = ggml_permute(ctx, k, 0, 2, 1, 3);
-        v = ggml_permute(ctx, v, 0, 2, 1, 3);
 
-        ggml_tensor_dump("===> q", q);
-        ggml_tensor_dump("===> k", k);
-        ggml_tensor_dump("===> v", v);
+        // CheckPoint("--------------------------------------?????????????");
+        // ggml_tensor_dump("===> q1", q);
+        // ggml_tensor_dump("===> k1", k);
+        // ggml_tensor_dump("===> v1", v);
+        // ===> q1    f32 [64, 16, 148225, 1], 
+        // ===> k1    f32 [64, 16, 512, 1], 
+        // ===> v1    f32 [64, 16, 512, 1],  (reshaped) (view) (cont)
+
+        // ----------------------------------------------------------------------------------------
+        q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));
+        k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
+        v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
+
+        // ggml_tensor_dump("===> q2", q);
+        // ggml_tensor_dump("===> k2", k);
+        // ggml_tensor_dump("===> v2", v);
+        // ===> q2    f32 [64, 148225, 16, 1],  (permuted) (cont)
+        // ===> k2    f32 [64, 512, 16, 1],  (permuted) (cont)
+        // ===> v2    f32 [64, 512, 16, 1],  (reshaped) (view) (cont) (permuted) (cont)
+
 
         ggml_tensor_t *out = scaled_dot_product_attention(ctx, q, k, v);
-        out = ggml_reshape_4d(ctx, out, 0, 2, 1, 3);
+        out = ggml_cont(ctx, ggml_permute(ctx, out, 0, 2, 1, 3));
         out = ggml_reshape_3d(ctx, out, -1, n_q, bs);
-
-        ggml_tensor_dump("===> out", out);
+        //  out    f32 [1024, 148225, 1, 1],  (permuted) (cont) (reshaped)
 
         return out;
     }
@@ -193,9 +205,9 @@ struct MultiheadCrossAttention {
         c_kv.has_bias = false;
         c_kv.create_weight_tensors(ctx);
 
-        c_kv.in_features = width;
-        c_kv.out_features = width;
-        c_kv.has_bias = true;
+        c_proj.in_features = width;
+        c_proj.out_features = width;
+        c_proj.has_bias = true;
         c_proj.create_weight_tensors(ctx);
 
         attention.heads = heads;
@@ -346,7 +358,7 @@ struct ResidualCrossAttentionBlock {
         snprintf(s, sizeof(s), "%s%s", prefix, "ln_2.");
         ln_2.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "ln_3");
+        snprintf(s, sizeof(s), "%s%s", prefix, "ln_3.");
         ln_3.setup_weight_names(s);
 
         snprintf(s, sizeof(s), "%s%s", prefix, "mlp.");
@@ -376,14 +388,17 @@ struct FourierEmbedder {
     const int input_dim = 3;
     const int out_dim = 51;
 
-    ggml_tensor_t *frequencies;
+    // ggml_tensor_t *frequencies;
 
     void create_weight_tensors(struct ggml_context* ctx) {
-        frequencies = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, num_freqs);
+        GGML_UNUSED(ctx);
+
+        // frequencies = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, num_freqs, 1);
     }
 
     void setup_weight_names(const char *prefix) {
-        ggml_format_name(frequencies, "%s%s", prefix, "frequencies");
+        GGML_UNUSED(prefix);
+        // ggml_format_name(frequencies, "%s%s", prefix, "frequencies");
     }
 
     // def forward(self, x):
@@ -395,19 +410,33 @@ struct FourierEmbedder {
     //     # tensor [embed] size: [1, 8000, 24], min: -129.279999, max: 129.279999, mean: -20.998594
     //     return torch.cat((x, embed.sin(), embed.cos()), dim=-1) # [1, 8000, 51]
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        // x    f32 [3, 148225, 1, 1], 
+
         int C0 = (int)x->ne[0]; // 3
         int C1 = (int)x->ne[1]; // 8000
         int C2 = (int)x->ne[2]; // 1
-        int C3 = 1;
-        ggml_tensor_t* embed = ggml_reshape_4d(ctx, x, C0, C1, C2, C3);
-        ggml_tensor_dump("embed1", embed);
+        // int C3 = 1;
+        ggml_tensor_t* embed = ggml_reshape_4d(ctx, x, 1, C0, C1, C2);
+        embed = ggml_repeat_ext(ctx, embed, 8, 1, 1, 1);
+        // embed1    f32 [8, 3, 148225, 1], 
 
-        embed = ggml_nn_mul_mat(ctx, embed, frequencies);
+        ggml_tensor_t *frequencies = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, num_freqs, 1);
+        // frequencies    f32 [8, 1, 1, 1], 
+
+        float data[8] = {1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f};
+        #if 0 // xxxx_8888
+         ggml_backend_tensor_set(frequencies, data, 0, ggml_nbytes(frequencies));
+        #endif
+
+        // #### xxxx_9999
+        embed = ggml_mul(ctx, embed, frequencies); // Dot
+        // embed f32 [8, 3, 148225, 1],
+
         embed = ggml_reshape_3d(ctx, embed, 24, C1, 1);
-        ggml_tensor_dump("embed2", embed);
+        // embed    f32 [24, 148225, 1, 1],  (reshaped)
 
         x = ggml_cat(ctx, 3, x, ggml_sin(ctx, embed), ggml_cos(ctx, embed), 0/*dim*/);
-        ggml_tensor_dump("embed3", x);
+        // embed f32 [51, 148225, 1, 1],
 
     	return x;
     }
@@ -470,10 +499,14 @@ struct CrossAttentionDecoder {
     }
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* queries, ggml_tensor_t *latents) {
-        ggml_tensor_t *query_embeddings = query_proj.forward(ctx, fourier_embedder.forward(ctx, queries));
-        ggml_tensor_t *x = cross_attn_decoder.forward(ctx, query_embeddings, latents);
+        ggml_tensor_t *x;
+        x = fourier_embedder.forward(ctx, queries);
+        x = query_proj.forward(ctx, x);
+        x = cross_attn_decoder.forward(ctx, x, latents);
         x = ln_post.forward(ctx, x);
-        return output_proj.forward(ctx, x);
+        x = output_proj.forward(ctx, x);
+
+        return x;
     }
 };
 
@@ -544,12 +577,12 @@ struct QKVMultiheadAttention {
         // --------------------------------------------------------------------------
         q = q_norm.forward(ctx, q);
         k = k_norm.forward(ctx, k);
-        q = ggml_reshape_4d(ctx, q, 0, 2, 1, 3);
-        k = ggml_reshape_4d(ctx, k, 0, 2, 1, 3);
-        v = ggml_reshape_4d(ctx, v, 0, 2, 1, 3);
+        q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));
+        k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
+        v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
 
         ggml_tensor_t *out = scaled_dot_product_attention(ctx, q, k, v);
-        out = ggml_reshape_4d(ctx, out, 0, 2, 1, 3);
+        out = ggml_cont(ctx, ggml_permute(ctx, out, 0, 2, 1, 3));
         out = ggml_reshape_3d(ctx, out, -1, n_q, bs);
 
     	return out;
@@ -743,12 +776,14 @@ struct Transformer {
     }
 };
 
-
-struct ShapeVAE {
+// struct ShapeVAE
+struct ShapeNetwork : GGMLNetwork {
     const int num_latents = 512;
     const int embed_dim = 64;
     const int width = 1024;
     const int heads = 16;
+    const int grid_res = 385;
+
     // const int num_decoder_layers = 16;
 
     // network hparams
@@ -758,6 +793,12 @@ struct ShapeVAE {
     struct Linear post_kl;
     struct Transformer transformer;
     struct CrossAttentionDecoder geo_decoder;
+
+    size_t get_graph_size()
+    {
+        return 16*GGML_DEFAULT_GRAPH_SIZE; // 2048
+    }
+
 
     void create_weight_tensors(struct ggml_context* ctx) {
         post_kl.in_features = embed_dim;
@@ -773,15 +814,18 @@ struct ShapeVAE {
         // geo_decoder.width = 1024; // width
         // geo_decoder.heads = 16; // heads
         // geo_decoder.mlp_expand_ratio = 4; // mlp_expand_ratio
-        // geo_decoder.create_weight_tensors(ctx);
+        geo_decoder.create_weight_tensors(ctx);
     }
 
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
+
         snprintf(s, sizeof(s), "%s%s", prefix, "post_kl.");
         post_kl.setup_weight_names(s);
+
         snprintf(s, sizeof(s), "%s%s", prefix, "transformer.");
         transformer.setup_weight_names(s);
+
         snprintf(s, sizeof(s), "%s%s", prefix, "geo_decoder.");
         geo_decoder.setup_weight_names(s);
     }
@@ -819,18 +863,21 @@ struct ShapeVAE {
     //     return grid_logits
 
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* latents) {
+    ggml_tensor_t* forward(ggml_context_t* ctx, int argc, ggml_tensor_t* argv[]) {
+        GGML_ASSERT(argc == 1);
+        ggml_tensor_t *latents = argv[0];
+        //     # tensor [latents] size: [1, 512, 64], min: -4.003906, max: 3.90625, mean: 0.018309
+
         // 1. latents decode
         latents = ggml_scale(ctx, latents, scale_factor);
         latents = post_kl.forward(ctx, latents);
         latents = transformer.forward(ctx, latents);
 
         // 2. latents to 3d volume
-        int grid_res = 385;
-        int num_chunks = 8 * 1024;
         int batch_size = latents->ne[2]; // === 1
         GGML_ASSERT(batch_size == 1);
 
+        // return latents;
 
         // 3. running geo_decoder
         ggml_tensor_t *chunk_queries = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, grid_res*grid_res, 1);
@@ -838,10 +885,17 @@ struct ShapeVAE {
         ggml_tensor_t *grid_logits = nullptr;
 
         for (int n = 0; n < grid_res; n++) {
-            std::vector<float> data = dense_grid_data(n, grid_res, 1.01);
-            dense_grid_fill(chunk_queries, data);
+            // CheckPoint("============================ n = %d", n);
 
-            ggml_tensor_dump("chunk_queries", chunk_queries);
+            std::vector<float> data = dense_grid_data(n, grid_res, 1.01);
+
+            // CheckPoint("dense_grid_fill 1");
+            #if 0 // xxxx_8888
+            dense_grid_fill(chunk_queries, data); // xxxx_8888
+            #endif
+            // CheckPoint("dense_grid_fill 2");
+
+            // ggml_tensor_dump("chunk_queries", chunk_queries);
             logits = geo_decoder.forward(ctx, chunk_queries, latents);
 
             if (grid_logits == nullptr) {
@@ -849,12 +903,72 @@ struct ShapeVAE {
             } else {
                 grid_logits = ggml_concat(ctx, grid_logits, logits, 1/*dim*/);
             }
+            // ggml_tensor_dump("grid_logits", grid_logits);
         }
 
-        grid_logits = ggml_reshape_4d(ctx, grid_logits, grid_res, grid_res, grid_res, 3);
+        CheckPoint(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
         ggml_tensor_dump("grid_logits", grid_logits);
+        // grid_logits    f32 [1, 57066625, 1, 1], 
+
+        // CheckPoint(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+        // GGML_API struct ggml_tensor * ggml_view_4d(
+        //         struct ggml_context * ctx,
+        //         struct ggml_tensor  * a,
+        //         int64_t               ne0,
+        //         int64_t               ne1,
+        //         int64_t               ne2,
+        //         int64_t               ne3,
+        //         size_t                nb1, // row   stride in bytes
+        //         size_t                nb2, // slice stride in bytes
+        //         size_t                nb3,
+        //         size_t                offset);
+
+        // grid_logits = ggml_view_4d(ctx, grid_logits, grid_res, grid_res, grid_res, 1, grid_logits->nb[1], grid_logits->nb[2], grid_logits->nb[3], 0);
+        // ggml_tensor_dump("grid_logits", grid_logits);
+        // // grid_logits    f32 [385, 385, 385, 1],  (reshaped)
+        // CheckPoint(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 
     	return grid_logits;
+    }
+};
+
+
+
+struct ShapeModel {
+    ShapeNetwork shape_net;
+    GGMLModel model;
+
+    int init(int device)
+    {
+        // -----------------------------------------------------------------------------------------
+        shape_net.set_device(device);
+        shape_net.start_engine();
+        shape_net.dump();
+
+        CheckPoint();
+        check_point(model.preload("models/image3d_shapevae_f16.gguf") == RET_OK);
+        CheckPoint();
+
+        // load weights ...
+        shape_net.load_weight(&model, "");
+
+        return RET_OK;
+    }
+
+    TENSOR* forward(TENSOR* latents)
+    {
+        TENSOR* argv[1];
+        argv[0] = latents;
+
+        TENSOR* y = shape_net.engine_forward(ARRAY_SIZE(argv), argv);
+
+        return y;
+    }
+
+    void exit()
+    {
+        model.clear();
+        shape_net.stop_engine();
     }
 };
 

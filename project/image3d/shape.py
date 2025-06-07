@@ -15,9 +15,10 @@ from einops import repeat
 import todos
 import pdb
 
+
 # xxxx_8888 ggml_mesh_grid3d(ctx, X, Y, Z)
 def dense_grid(res, box_m=1.01):
-    assert res == 384
+    # assert res == 384
     x = torch.linspace(-box_m, box_m, res + 1)
     y = torch.linspace(-box_m, box_m, res + 1)
     z = torch.linspace(-box_m, box_m, res + 1)
@@ -66,6 +67,7 @@ class ShapeVAE(nn.Module):
 
         self.load_weights()
 
+
     def forward(self, latents):
         # 1. latents decode
         latents = latents/self.scale_factor 
@@ -81,6 +83,7 @@ class ShapeVAE(nn.Module):
         xyz_samples = dense_grid(384)
         xyz_samples = xyz_samples.view(-1, 3).to(latents.device)
         # tensor [xyz_samples] size: [57066625, 3], min: -1.009766, max: 1.009766, mean: 0.0
+        # xyz_samples -- 653M !!!
 
         # running on cuda device
         batch_logits = []

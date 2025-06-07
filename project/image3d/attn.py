@@ -16,12 +16,15 @@ class FourierEmbedder(nn.Module):
         frequencies = 2.0 ** torch.arange(num_freqs, dtype=torch.float32)
         self.register_buffer("frequencies", frequencies, persistent=False)
         self.out_dim = input_dim * (num_freqs * 2 + 1)  # 51
+        # frequencies -- tensor([  1.,   2.,   4.,   8.,  16.,  32.,  64., 128.])
 
     def forward(self, x):
         # tensor [x] size: [1, 8000, 3], min: -1.01, max: 1.01, mean: -0.65878
         # self.frequencies -- tensor([  1.,   2.,   4.,   8.,  16.,  32.,  64., 128.], device='cuda:0')
         # (x[..., None].contiguous() * self.frequencies).size() -- [1, 8000, 3, 8]
         # x.shape[:-1] -- [1, 8000]
+        pdb.set_trace()
+        
         embed = (x[..., None].contiguous() * self.frequencies).view(*x.shape[:-1], -1)
         # tensor [embed] size: [1, 8000, 24], min: -129.279999, max: 129.279999, mean: -20.998594
 
@@ -54,12 +57,12 @@ class QKVMultiheadCrossAttention(nn.Module):
     def forward(self, q, kv):
         # tensor [q] size: [1, 8000, 1024], min: -8.914062, max: 8.632812, mean: -0.044021
         # tensor [kv] size: [1, 512, 2048], min: -8.289062, max: 7.117188, mean: -0.008912
-        _, n_ctx, _ = q.shape
-        bs, n_data, width = kv.shape
+        _, n_q, _ = q.shape
+        bs, n_kv, width = kv.shape
         attn_ch = width // self.heads // 2 # 64
 
-        q = q.view(bs, n_ctx, self.heads, -1) # [1, 8000, 1024] --> [1, 8000, 16, 64]
-        kv = kv.view(bs, n_data, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
+        q = q.view(bs, n_q, self.heads, -1) # [1, 8000, 1024] --> [1, 8000, 16, 64]
+        kv = kv.view(bs, n_kv, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
         k, v = torch.split(kv, attn_ch, dim=-1)
         # (Pdb) pp k.size() -- [1, 512, 16, 64]
         # (Pdb) pp v.size() -- [1, 512, 16, 64]
@@ -77,7 +80,7 @@ class QKVMultiheadCrossAttention(nn.Module):
         #     tensor [item] size: [1, 16, 512, 64], min: -9.210938, max: 9.054688, mean: -0.000345
         #     tensor [item] size: [1, 16, 512, 64], min: -7.964844, max: 7.097656, mean: 0.005364
         out = F.scaled_dot_product_attention(q, k, v)
-        out = out.transpose(1, 2).reshape(bs, n_ctx, -1)
+        out = out.transpose(1, 2).reshape(bs, n_q, -1)
         # tensor [out] size: [1, 8000, 1024], min: -7.214844, max: 5.949219, mean: 0.02275
 
         return out
@@ -136,9 +139,9 @@ class QKVMultiheadAttention(nn.Module):
     def forward(self, qkv):
         # tensor [qkv] size: [1, 512, 3072], min: -9.280807, max: 11.263318, mean: -0.00128
 
-        bs, n_ctx, width = qkv.shape
+        bs, n_q, width = qkv.shape
         attn_ch = width // self.heads // 3
-        qkv = qkv.view(bs, n_ctx, self.heads, -1)
+        qkv = qkv.view(bs, n_q, self.heads, -1)
         q, k, v = torch.split(qkv, attn_ch, dim=-1)
 
         q = self.q_norm(q)
@@ -154,7 +157,7 @@ class QKVMultiheadAttention(nn.Module):
         #     tensor [item] size: [1, 16, 512, 64], min: -3.498047, max: 3.671875, mean: -0.000247
 
         # [1, 16, 512, 64] ==> [1, 512, 16, 64] ==> [1, 512, 1024]
-        out = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(bs, n_ctx, -1)
+        out = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(bs, n_q, -1)
         return out
 
 

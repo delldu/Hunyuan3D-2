@@ -47,7 +47,6 @@ int main(int argc, char** argv)
 
     };
 
-    printf("checkpoint 1 ...\n");
 
     if (argc <= 1)
         image3d_help(argv[0]);
@@ -67,12 +66,12 @@ int main(int argc, char** argv)
         }
     }
 
-    printf("checkpoint 2 ...\n");
 
     // client
     if (optind == argc) // no input image, nothing to do ...
         return 0;
 
+#if 0
     Dinov2Model dinov2_model;
 
     // int network
@@ -80,7 +79,6 @@ int main(int argc, char** argv)
         dinov2_model.init(device_no);
     }
 
-    printf("checkpoint 3 ... optind = %d, argc = %d\n", optind, argc);
 
     for (int i = optind; i < argc; i++) {
         // image3d_predict(&dinov2_model, argv[i], output_dir);
@@ -105,6 +103,75 @@ int main(int argc, char** argv)
     {
         dinov2_model.exit();
     }
+#endif
+
+#if 0
+    DiTModel dit_model;
+
+    // int network
+    {
+        dit_model.init(device_no);
+    }
+
+
+    for (int i = optind; i < argc; i++) {
+        // image3d_predict(&dit_model, argv[i], output_dir);
+        printf("create from %s to %s ...\n", argv[i], output_dir);
+    }
+    TENSOR *x = tensor_create(1, 2, 512, 64);
+    TENSOR *t = tensor_create(1, 1, 1, 2);
+    TENSOR *cond = tensor_create(1, 2, 1370, 1536);
+
+    //     # tensor [x] size: [2, 512, 64], min: -4.179688, max: 4.238281, mean: 0.005243
+    //     # tensor [t] size: [2], min: 0.0, max: 0.0, mean: 0.0
+    //     # tensor [cond] size: [2, 1370, 1536], min: -15.28125, max: 14.375, mean: -0.009306
+
+    TENSOR *y = dit_model.forward(x, t, cond);
+
+    tensor_show("y", y);
+
+    // # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
+
+    tensor_destroy(y);
+    tensor_destroy(x);
+
+
+    // free network ...
+    {
+        dit_model.exit();
+    }
+#endif
+
+#if 1
+    ShapeModel shape_model;
+
+    // int network
+    {
+        shape_model.init(device_no);
+    }
+
+
+    for (int i = optind; i < argc; i++) {
+        // image3d_predict(&shape_model, argv[i], output_dir);
+        printf("create from %s to %s ...\n", argv[i], output_dir);
+    }
+    TENSOR *x = tensor_create(1, 1, 512, 64);
+    TENSOR *y = shape_model.forward(x);
+
+    tensor_show("y", y);
+
+    // # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
+
+    tensor_destroy(y);
+    tensor_destroy(x);
+
+
+    // free network ...
+    {
+        shape_model.exit();
+    }
+#endif
+
 
     return 0;
 }
