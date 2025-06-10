@@ -1,6 +1,15 @@
+/************************************************************************************
+***
+*** Copyright 2025 Dell Du(18588220928@163.com), All Rights Reserved.
+***
+*** File Author: Dell, Tue 10 Jun 2025 12:42:29 PM CST
+***
+************************************************************************************/
+
+
+
 #ifndef __HUNYUAN3DDIT__H__
 #define __HUNYUAN3DDIT__H__
-// #include "ggml_engine.h"
 #include "ggml_model.h"
 #include "ggml_nn.h"
 
@@ -1080,45 +1089,5 @@ struct DiTNetwork : ggml::GGMLNetwork {
     }
 };
 
-
-// struct DiTModel {
-//     DiTNetwork dit_net;
-//     ggml::GGMLModel model;
-
-//     int init(int device)
-//     {
-//         dit_net.set_device(device);
-//         dit_net.start_engine();
-//         dit_net.dump();
-
-//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
-
-//         dit_net.load_weight(&model, "shape_dit.");
-//         model.clear();
-
-//         return RET_OK;
-//     }
-
-//     TENSOR* forward(TENSOR* x, TENSOR* t, TENSOR* cond)
-//     {
-//         TENSOR* argv[3];
-//         argv[0] = x;
-//         argv[1] = t;
-//         argv[2] = cond;
-
-//         // tensor [x] size: [2, 512, 64], min: -4.179688, max: 4.238281, mean: 0.005243
-//         // tensor [t] size: [2], min: 0.0, max: 0.0, mean: 0.0
-//         // tensor [cond] size: [2, 1370, 1536], min: -15.28125, max: 14.375, mean: -0.009306
-//         TENSOR* y = dit_net.engine_forward(ARRAY_SIZE(argv), argv);
-//         // tensor [y] size: [2, 512, 64], min: -4.257812, max: 4.207031, mean: -0.006032
-
-//         return y;
-//     }
-
-//     void exit()
-//     {
-//         dit_net.stop_engine();
-//     }
-// };
 
 #endif // __HUNYUAN3DDIT__H__

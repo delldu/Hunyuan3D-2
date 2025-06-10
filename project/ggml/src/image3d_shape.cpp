@@ -1,7 +1,10 @@
-// #define GGML_ENGINE_IMPLEMENTATION
-// #include <ggml_engine.h>
-// #define GGML_NN_IMPLEMENTATION
-// #include <ggml_nn.h>
+/************************************************************************************
+***
+*** Copyright 2025 Dell Du(18588220928@163.com), All Rights Reserved.
+***
+*** File Author: Dell, Tue 10 Jun 2025 12:42:29 PM CST
+***
+************************************************************************************/
 
 #include "dinov2.h"
 #include "dit.h"
@@ -80,7 +83,7 @@ public:
 
     bool vae_forward(int device, Tensor4f* latents)
     {
-        DiTNetwork vae_net;
+        ShapeVaeNetwork vae_net;
         ggml::Model vae_model;
 
         if (!vae_model.load(&vae_net, device, model_weight_, "shape_vae."))
@@ -140,6 +143,71 @@ int image3d_predict(int device, int argc, char *argv[], char* output_dir)
 	    	continue;
 	    }
 	    redos::tensor_show("dinov2", shape_model.dinov2_output);
+        // Tensor dinov2 [1, 1, 1370, 1536]
+
+        // int C1 = shape_model.dinov2_output.dimension(1); // 1
+        // int C2 = shape_model.dinov2_output.dimension(2); // 1370
+        // int C3 = shape_model.dinov2_output.dimension(3); // 1536
+        // Eigen::array<Eigen::Index, 3> dims = { C1, C2, C3};
+        // Tensor3f dit_cond1 = shape_model.dinov2_output.reshape(dims);
+        Tensor4f dit_zeros = shape_model.dinov2_output;
+        dit_zeros.setConstant(0.0f);
+        Tensor4f dit_cond = redos::tensor_concat(shape_model.dinov2_output, dit_zeros, 1/*dim*/);
+        redos::tensor_show("dit_cond", dit_cond);
+
+        Tensor4f latents(1, 1, 512, 64);
+        redos::tensor_randn(latents);
+        redos::tensor_show("latents", latents);
+
+        const float guidance_scale = 5.0f;
+        int num_inference_steps = 5;
+        float step_scale = 1.0f/(num_inference_steps - 1.0f);
+        // Tensor1f sigmas(num_inference_steps);
+        // redos::tensor_arange(sigmas, 0, 1.0f/num_inference_steps);
+        // redos::tensor_show("sigmas", sigmas);
+
+        // for i in range(num_inference_steps):
+        //     pbar.update(1)
+        //     latent_model_input = torch.cat([latents] * 2, dim=0) # size() -- [2, 512, 64]
+
+
+        //     timestep = sigmas[i].expand(2)
+        //     noise_pred = self.shape_dit(latent_model_input, timestep, dit_condition) # xxxx_9999
+        //     # tensor [noise_pred] size: [2, 512, 64], min: -3.826172, max: 3.9375, mean: 0.000697
+
+        //     noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+        //     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+
+        //     if (i < num_inference_steps - 1):
+        //         latents = latents + step_scale * noise_pred
+
+        Tensor4f timestep(1, 1, 1, 2);
+
+        for (int n = 0; n < num_inference_steps; n++) {
+            printf("------------- progress %d ...\n", n);
+
+            Tensor4f latent_model_input = redos::tensor_concat(latents, latents, 1/*dim*/);
+            timestep.setConstant(n * 1.0f/num_inference_steps); // sigmas[n]
+
+            if (! shape_model.dit_forward(device, &latent_model_input, &timestep, &dit_cond)) {
+                continue;
+            }
+
+            Tensor4f noise_pred_cond = redos::tensor_slice(shape_model.dit_output, 1/*dim*/, 0/*start*/, 1/*stop*/);
+            Tensor4f noise_pred_uncond = redos::tensor_slice(shape_model.dit_output, 1/*dim*/, 1/*start*/, 2/*stop*/);
+
+            Tensor4f noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond);
+
+            latents = latents + step_scale * noise_pred;
+        }
+        redos::tensor_show("latents2", latents);
+
+
+        if (! shape_model.vae_forward(device, &latents)) {
+            continue;
+        }
+        redos::tensor_show("====> vae_output", shape_model.vae_output);
+
 
         p = strrchr(argv[i], '/');
         if (p != NULL) {

@@ -1,6 +1,13 @@
+/************************************************************************************
+***
+*** Copyright 2025 Dell Du(18588220928@163.com), All Rights Reserved.
+***
+*** File Author: Dell, Tue 10 Jun 2025 12:42:29 PM CST
+***
+************************************************************************************/
+
 #ifndef __SHAPEVAE__H__
 #define __SHAPEVAE__H__
-// #include "ggml_engine.h"
 #include "ggml_model.h"
 #include "ggml_nn.h"
 
@@ -754,79 +761,4 @@ struct GeoDecoder : ggml::GGMLNetwork {
     }
 };
 
-
-// struct ShapeVaeModel {
-//     ShapeVaeNetwork shape_vae_net;
-
-//     int init(int device)
-//     {
-//         GGMLModel model;
-
-//         shape_vae_net.set_device(device);
-//         shape_vae_net.start_engine();
-//         shape_vae_net.dump();
-//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
-//         shape_vae_net.load_weight(&model, "shape_vae.");
-//         model.clear();
-
-//         return RET_OK;
-//     }
-
-//     TENSOR* forward(TENSOR* latents)
-//     {
-//         TENSOR* argv[1];
-//         argv[0] = latents;
-
-//         // # tensor [latents] size: [1, 512, 64], min: -4.003906, max: 3.90625, mean: 0.018309
-//         TENSOR* y = shape_vae_net.engine_forward(ARRAY_SIZE(argv), argv);
-//         // # tensor [latents] size: [1, 512, 1024], min: -374.5, max: 37.09375, mean: 0.019848
-
-//         return y;
-//     }
-
-//     void exit()
-//     {
-//         shape_vae_net.stop_engine();
-//     }
-// };
-
-
-// struct GeoDecoderModel {
-//     GeoDecoder geo_decorde_net;
-
-//     int init(int device)
-//     {
-//         ggml::GGMLModel model;
-
-//         // -----------------------------------------------------------------------------------------
-//         geo_decorde_net.set_device(device);
-//         geo_decorde_net.start_engine();
-//         geo_decorde_net.dump();
-//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
-//         // load weights ...
-//         geo_decorde_net.load_weight(&model, "shape_vae.geo_decoder.");
-//         model.clear();
-
-//         return RET_OK;
-//     }
-
-//     TENSOR* forward(TENSOR *queries, TENSOR* latents)
-//     {
-//         TENSOR* argv[1];
-//         argv[0] = queries;
-//         argv[1] = latents;
-
-//         // # tensor [queries] size: [1, 8000, 3], min: -1.009766, max: 1.009766, mean: -0.658704
-//         // # tensor [latents] size: [1, 512, 1024], min: -369.75, max: 36.4375, mean: 0.016268
-//         TENSOR* y = geo_decorde_net.engine_forward(ARRAY_SIZE(argv), argv);
-//         // # tensor [y] size: [1, 8000, 1], min: -1.000977, max: -0.999023, mean: -0.999919
-
-//         return y;
-//     }
-
-//     void exit()
-//     {
-//         geo_decorde_net.stop_engine();
-//     }
-// };
 #endif // __SHAPEVAE__H__

@@ -9,16 +9,8 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-// #include <glob.h>
-
-// #include <ggml_engine.h>
-// #include <nimage/tensor.h>
-
-// #include "dinov2.h"
-// #include "dit.h"
-// #include "shapevae.h"
+// #include <string.h>
+// #include <unistd.h>
 
 #define DEFAULT_DEVICE 1
 #define DEFAULT_OUTPUT "output"
@@ -65,110 +57,6 @@ int main(int argc, char** argv)
             break;
         }
     }
-
-
-    // client
-    if (optind == argc) // no input image, nothing to do ...
-        return 0;
-
-#if 0
-    Dinov2Model dinov2_model;
-
-    // int network
-    {
-        dinov2_model.init(device_no);
-    }
-
-
-    for (int i = optind; i < argc; i++) {
-        // image3d_predict(&dinov2_model, argv[i], output_dir);
-        printf("create from %s to %s ...\n", argv[i], output_dir);
-    }
-    TENSOR *x = tensor_create(1, 3, 518, 518);
-    TENSOR *y = dinov2_model.forward(x);
-
-    tensor_show("y", y);
-
-    // Info: y Tensor: 1x1x1370x1536
-    // min: -16.2236, max: 12.5019, mean: -0.0144
-    // 0.9444 1.1059 1.5564 -1.8198 -0.1310 -0.8696 1.1567 -0.6701 -0.6838 2.2458 ... 0.3093 -0.5996 0.8670 -0.3768 0.2183 -0.1071 0.3080 -0.1961 1.3123 -0.0342 
-
-    // # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
-
-    tensor_destroy(y);
-    tensor_destroy(x);
-
-
-    // free network ...
-    {
-        dinov2_model.exit();
-    }
-#endif
-
-#if 0
-    DiTModel dit_model;
-
-    // int network
-    {
-        dit_model.init(device_no);
-    }
-
-
-    for (int i = optind; i < argc; i++) {
-        // image3d_predict(&dit_model, argv[i], output_dir);
-        printf("create from %s to %s ...\n", argv[i], output_dir);
-    }
-    TENSOR *x = tensor_create(1, 2, 512, 64);
-    TENSOR *t = tensor_create(1, 1, 1, 2);
-    TENSOR *cond = tensor_create(1, 2, 1370, 1536);
-
-    //     # tensor [x] size: [2, 512, 64], min: -4.179688, max: 4.238281, mean: 0.005243
-    //     # tensor [t] size: [2], min: 0.0, max: 0.0, mean: 0.0
-    //     # tensor [cond] size: [2, 1370, 1536], min: -15.28125, max: 14.375, mean: -0.009306
-
-    TENSOR *y = dit_model.forward(x, t, cond);
-
-    tensor_show("y", y);
-
-    // # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
-
-    tensor_destroy(y);
-    tensor_destroy(x);
-
-
-    // free network ...
-    {
-        dit_model.exit();
-    }
-#endif
-
-#if 0
-    ShapeVaeModel shape_vae_model;
-
-    // int network
-    {
-        shape_vae_model.init(device_no);
-    }
-
-    for (int i = optind; i < argc; i++) {
-        // image3d_predict(&shape_vae_model, argv[i], output_dir);
-        printf("create from %s to %s ...\n", argv[i], output_dir);
-
-        TENSOR *x = tensor_create(1, 1, 512, 64);
-        TENSOR *y = shape_vae_model.forward(x);
-
-        tensor_show("y", y);
-
-        tensor_destroy(y);
-        tensor_destroy(x);
-    }
-    // # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
-
-    // free network ...
-    {
-        shape_vae_model.exit();
-    }
-#endif
 
     return image3d_predict(device_no, argc - optind, &argv[optind], output_dir);
 }

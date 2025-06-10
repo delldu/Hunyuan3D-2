@@ -1,6 +1,13 @@
+/************************************************************************************
+***
+*** Copyright 2025 Dell Du(18588220928@163.com), All Rights Reserved.
+***
+*** File Author: Dell, Tue 10 Jun 2025 12:42:29 PM CST
+***
+************************************************************************************/
+
 #ifndef __DINOV2__H__
 #define __DINOV2__H__
-// #include "ggml_engine.h"
 #include "ggml_model.h"
 #include "ggml_nn.h"
 
@@ -424,44 +431,5 @@ struct Dinov2Network : ggml::GGMLNetwork {
         return x;
     }    
 };
-
-
-// struct Dinov2Model {
-//     Dinov2Network dinov2_net;
-//     ggml::GGMLModel model;
-
-//     int init(int device)
-//     {
-//         // -----------------------------------------------------------------------------------------
-//         dinov2_net.set_device(device);
-//         dinov2_net.start_engine();
-//         // dinov2_net.dump();
-
-//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
-
-//         // load weights ...
-//         dinov2_net.load_weight(&model, "shape_dinov2.");
-//         model.clear();
-
-//         return RET_OK;
-//     }
-
-//     TENSOR* forward(TENSOR* image)
-//     {
-//         TENSOR* argv[1];
-//         argv[0] = image;
-
-//         // tensor [image] size: [1, 3, 518, 518], min: -2.099609, max: 2.638672, mean: 1.449731
-//         TENSOR* y = dinov2_net.engine_forward(ARRAY_SIZE(argv), argv);
-//         // tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
-
-//         return y;
-//     }
-
-//     void exit()
-//     {
-//         dinov2_net.stop_engine();
-//     }
-// };
 
 #endif // __DINOV2__H__
