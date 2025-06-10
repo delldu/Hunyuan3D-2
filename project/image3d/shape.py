@@ -7,7 +7,7 @@ from torchvision import transforms
 
 from .dinov2 import Dinov2Network
 from .dit import Hunyuan3DDiT
-from .attn import Transformer, CrossAttentionDecoder
+from .attn import Transformer, GeoDecoder
 
 from tqdm import tqdm
 from einops import repeat
@@ -59,7 +59,7 @@ class ShapeVAE(nn.Module):
         # self.post_kl -- Linear(in_features=64, out_features=1024, bias=True)
 
         self.transformer = Transformer(width=width, layers=num_decoder_layers, heads=heads)
-        self.geo_decoder = CrossAttentionDecoder(
+        self.geo_decoder = GeoDecoder(
             out_channels=1, mlp_expand_ratio=4, width=width, heads=heads
         )
         self.scale_factor = scale_factor  # 1.0188137142395404
@@ -128,24 +128,29 @@ class ShapeGenerator(nn.Module):
     def __init__(self, device):
         super().__init__()
         self.device = device
-        self.dinov2_model = Dinov2Network()
-        self.dit_model = Hunyuan3DDiT()
-        self.vae_model = ShapeVAE()
+        self.shape_dinov2 = Dinov2Network()
+        self.shape_dit = Hunyuan3DDiT()
+        self.shape_vae = ShapeVAE()
+
+        # pdb.set_trace()
+        # self.half()
+        # torch.save(self.state_dict(), "/tmp/image3d_shape.pth") # float16
+
 
     def forward(self, image):
-        image = F.interpolate(image, size=(512, 512), mode="bilinear", align_corners=True)
+        # image = F.interpolate(image, size=(512, 512), mode="bilinear", align_corners=True)
 
         # tensor [image] size: [1, 3, 512, 512], min: 0.0, max: 1.0, mean: 0.8434
         image = image_transform(image)
         # tensor [inputs] size: [1, 3, 518, 518], min: -2.119141, max: 2.638672, mean: 1.745283
 
-        self.dinov2_model.to(self.device)
-        dinov2_output = self.dinov2_model(image)
+        self.shape_dinov2.to(self.device)
+        dinov2_output = self.shape_dinov2(image)
         # todos.debug.output_var("dinov2_output", dinov2_output)
         # tensor [dinov2_output] size: [1, 1370, 1536], min: -15.366865, max: 14.495687, mean: -0.018664
 
 
-        self.dinov2_model.cpu()
+        self.shape_dinov2.cpu()
 
         dit_condition = torch.cat((dinov2_output, torch.zeros_like(dinov2_output)), dim = 0)
         # tensor [dit_condition] size: [2, 1370, 1536], min: -16.389088, max: 15.987875, mean: -0.009674
@@ -159,14 +164,14 @@ class ShapeGenerator(nn.Module):
         pbar = tqdm(total=num_inference_steps, desc="Diffusion Sampling:")
         guidance_scale = 5.0
 
-        self.dit_model.to(self.device)
+        self.shape_dit.to(self.device)
         for i in range(num_inference_steps):
             pbar.update(1)
             latent_model_input = torch.cat([latents] * 2, dim=0) # size() -- [2, 512, 64]
 
 
             timestep = sigmas[i].expand(2)
-            noise_pred = self.dit_model(latent_model_input, timestep, dit_condition) # xxxx_9999
+            noise_pred = self.shape_dit(latent_model_input, timestep, dit_condition) # xxxx_9999
             # tensor [noise_pred] size: [2, 512, 64], min: -3.826172, max: 3.9375, mean: 0.000697
 
             noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
@@ -175,13 +180,13 @@ class ShapeGenerator(nn.Module):
             if (i < num_inference_steps - 1):
                 latents = latents + step_scale * noise_pred
 
-        self.dit_model.cpu()
+        self.shape_dit.cpu()
         # todos.debug.output_var("latents", latents)
         # tensor [latents] size: [1, 512, 64], min: -3.639221, max: 4.058057, mean: 0.003392
 
-        self.vae_model.to(self.device)
-        grid_logits = self.vae_model(latents)
-        self.vae_model.cpu()
+        self.shape_vae.to(self.device)
+        grid_logits = self.shape_vae(latents)
+        self.shape_vae.cpu()
         # todos.debug.output_var("grid_logits", grid_logits)
         # tensor [grid_logits] size: [1, 385, 385, 385], min: -1.065998, max: 1.185178, mean: -0.799923
 

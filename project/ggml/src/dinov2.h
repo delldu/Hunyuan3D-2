@@ -1,6 +1,7 @@
 #ifndef __DINOV2__H__
 #define __DINOV2__H__
-#include "ggml_engine.h"
+// #include "ggml_engine.h"
+#include "ggml_model.h"
 #include "ggml_nn.h"
 
 #pragma GCC diagnostic ignored "-Wformat-truncation"
@@ -384,7 +385,7 @@ struct Dinov2Embeddings {
 };
 
 
-struct Dinov2Network : GGMLNetwork {
+struct Dinov2Network : ggml::GGMLNetwork {
     struct Dinov2Embeddings embeddings;
     struct Dinov2Encoder encoder;
     struct LayerNorm layernorm;
@@ -425,40 +426,42 @@ struct Dinov2Network : GGMLNetwork {
 };
 
 
-struct Dinov2Model {
-    Dinov2Network dinov2_net;
-    GGMLModel model;
+// struct Dinov2Model {
+//     Dinov2Network dinov2_net;
+//     ggml::GGMLModel model;
 
-    int init(int device)
-    {
-        // -----------------------------------------------------------------------------------------
-        dinov2_net.set_device(device);
-        dinov2_net.start_engine();
-        // dinov2_net.dump();
+//     int init(int device)
+//     {
+//         // -----------------------------------------------------------------------------------------
+//         dinov2_net.set_device(device);
+//         dinov2_net.start_engine();
+//         // dinov2_net.dump();
 
-        check_point(model.preload("models/dinov2_q8.gguf") == RET_OK);
+//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
 
-        // load weights ...
-        dinov2_net.load_weight(&model, "");
+//         // load weights ...
+//         dinov2_net.load_weight(&model, "shape_dinov2.");
+//         model.clear();
 
-        return RET_OK;
-    }
+//         return RET_OK;
+//     }
 
-    TENSOR* forward(TENSOR* image)
-    {
-        TENSOR* argv[1];
-        argv[0] = image;
+//     TENSOR* forward(TENSOR* image)
+//     {
+//         TENSOR* argv[1];
+//         argv[0] = image;
 
-        TENSOR* y = dinov2_net.engine_forward(ARRAY_SIZE(argv), argv);
+//         // tensor [image] size: [1, 3, 518, 518], min: -2.099609, max: 2.638672, mean: 1.449731
+//         TENSOR* y = dinov2_net.engine_forward(ARRAY_SIZE(argv), argv);
+//         // tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
 
-        return y;
-    }
+//         return y;
+//     }
 
-    void exit()
-    {
-        model.clear();
-        dinov2_net.stop_engine();
-    }
-};
+//     void exit()
+//     {
+//         dinov2_net.stop_engine();
+//     }
+// };
 
 #endif // __DINOV2__H__

@@ -136,11 +136,6 @@ class QKNorm(torch.nn.Module):
 
     def forward(self, q, k, v):
         # !!!!!!!!!!!!!!! useless, place holder ...
-
-        # q = self.query_norm(q)
-        # k = self.key_norm(k)
-        # # return q.to(v), k.to(v)
-        # return q, k
         return q
 
 
@@ -156,14 +151,6 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         # !!!!!!!!!!!!!!! useless, place holder ...
-        # qkv = self.qkv(x)
-        # todos.debug.output_var("qkv", qkv)
-        # q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        # todos.debug.output_var("q, k, v", (q, k, v))
-
-        # q, k = self.norm(q, k, v)
-        # x = attention(q, k, v)
-        # x = self.proj(x)
         return x
 
 class SingleModulation(nn.Module):

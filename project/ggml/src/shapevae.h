@@ -1,30 +1,11 @@
 #ifndef __SHAPEVAE__H__
 #define __SHAPEVAE__H__
-#include "ggml_engine.h"
+// #include "ggml_engine.h"
+#include "ggml_model.h"
 #include "ggml_nn.h"
 
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 extern ggml_tensor_t* scaled_dot_product_attention(struct ggml_context* ctx, ggml_tensor_t* query, ggml_tensor_t *key, ggml_tensor_t *value);
-
-// bool ggml_backend_buffer_is_host(ggml_backend_buffer_t buffer) {
-//     return ggml_backend_buft_is_host(ggml_backend_buffer_get_type(buffer));
-// }
-
-
-// GGML_CALL void ggml_backend_tensor_set(struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
-//     ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
-
-//     GGML_ASSERT(buf != NULL && "tensor buffer not set");
-//     GGML_ASSERT(tensor->data != NULL && "tensor not allocated");
-//     GGML_ASSERT(offset + size <= ggml_nbytes(tensor) && "tensor write out of bounds");
-
-//     if (!size) {
-//         return;
-//     }
-
-//     buf->iface.set_tensor(buf, tensor, data, offset, size);
-// }
-
 
 // def dense_grid(res, box_m=1.01):
 //     # assert res == 384
@@ -79,7 +60,6 @@ struct QKVMultiheadCrossAttention {
     int heads = 16;
     int width = 1024;
 
-    // network params
     struct LayerNorm q_norm;
     struct LayerNorm k_norm;
 
@@ -133,9 +113,7 @@ struct QKVMultiheadCrossAttention {
     //     out = F.scaled_dot_product_attention(q, k, v)
     //     out = out.transpose(1, 2).reshape(bs, n_q, -1)
     //     # tensor [out] size: [1, 8000, 1024], min: -7.214844, max: 5.949219, mean: 0.02275
-
     //     return out
-
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* q, ggml_tensor_t* kv) {
         int n_q = (int)q->ne[1];
@@ -143,37 +121,27 @@ struct QKVMultiheadCrossAttention {
         int n_kv = (int)kv->ne[1];
         int width = (int)kv->ne[0];
 
-    //     q = q.view(bs, n_q, self.heads, -1) # [1, 8000, 1024] --> [1, 8000, 16, 64]
-    //     kv = kv.view(bs, n_kv, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
+        // q = q.view(bs, n_q, self.heads, -1) # [1, 8000, 1024] --> [1, 8000, 16, 64]
+        // v = kv.view(bs, n_kv, self.heads, -1) # [1, 512, 2048] --> [1, 512, 16, 128]
         q = ggml_reshape_4d(ctx, q, -1, heads, n_q, bs);
         kv = ggml_reshape_4d(ctx, kv, -1, heads, n_kv, bs);
         int S = (int)kv->ne[0]/2; // 64
         ggml_tensor_t *k = ggml_nn_slice(ctx, kv, 0/*dim*/, 0*S/*start*/, 1*S/*stop*/, 1);
         ggml_tensor_t *v = ggml_nn_slice(ctx, kv, 0/*dim*/, 1*S/*start*/, 2*S/*stop*/, 1);
-        q = q_norm.forward(ctx, q);
-        k = q_norm.forward(ctx, k);
-
-        // CheckPoint("--------------------------------------?????????????");
-        // ggml_tensor_dump("===> q1", q);
-        // ggml_tensor_dump("===> k1", k);
-        // ggml_tensor_dump("===> v1", v);
-        // ===> q1    f32 [64, 16, 148225, 1], 
-        // ===> k1    f32 [64, 16, 512, 1], 
-        // ===> v1    f32 [64, 16, 512, 1],  (reshaped) (view) (cont)
 
         // ----------------------------------------------------------------------------------------
+        q = q_norm.forward(ctx, q);
+        k = q_norm.forward(ctx, k);
+        // q    f32 [64, 16, 148225, 1], 
+        // k    f32 [64, 16, 512, 1], 
+        // v    f32 [64, 16, 512, 1],  (reshaped) (view) (cont)
         q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));
         k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
         v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
-
-        // ggml_tensor_dump("===> q2", q);
-        // ggml_tensor_dump("===> k2", k);
-        // ggml_tensor_dump("===> v2", v);
-        // ===> q2    f32 [64, 148225, 16, 1],  (permuted) (cont)
-        // ===> k2    f32 [64, 512, 16, 1],  (permuted) (cont)
-        // ===> v2    f32 [64, 512, 16, 1],  (reshaped) (view) (cont) (permuted) (cont)
-
-
+        // q    f32 [64, 148225, 16, 1],  (permuted) (cont)
+        // k    f32 [64, 512, 16, 1],  (permuted) (cont)
+        // v    f32 [64, 512, 16, 1],  (reshaped) (view) (cont) (permuted) (cont)
+        // ----------------------------------------------------------------------------------------
         ggml_tensor_t *out = scaled_dot_product_attention(ctx, q, k, v);
         out = ggml_cont(ctx, ggml_permute(ctx, out, 0, 2, 1, 3));
         out = ggml_reshape_3d(ctx, out, -1, n_q, bs);
@@ -188,7 +156,6 @@ struct MultiheadCrossAttention {
     const int heads = 16;
     const int data_width = 1024;
 
-    // network params
     struct Linear c_q;
     struct Linear c_kv;
     struct Linear c_proj;
@@ -220,23 +187,13 @@ struct MultiheadCrossAttention {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "c_q.");
         c_q.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "c_kv.");
         c_kv.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "c_proj.");
         c_proj.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "attention.");
         attention.setup_weight_names(s);
     }
-
-    // def forward(self, x, data):
-    //     x = self.c_q(x)
-    //     data = self.c_kv(data)
-    //     x = self.attention(x, data)
-    //     x = self.c_proj(x)
-    //     return x
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* data) {
         x = c_q.forward(ctx, x);
@@ -253,19 +210,18 @@ struct MLP {
     int width = 1024;
     const int expand_ratio = 4;
 
-    // network params
     struct Linear c_fc;
     struct Linear c_proj;
 
     void create_weight_tensors(struct ggml_context* ctx) {
         c_fc.in_features = width;
         c_fc.out_features = width * expand_ratio;
-        c_fc.has_bias = true; // Fixed default
+        c_fc.has_bias = true;
         c_fc.create_weight_tensors(ctx);
 
         c_proj.in_features = width * expand_ratio;
         c_proj.out_features = width;
-        c_proj.has_bias = true; // Fixed default
+        c_proj.has_bias = true;
         c_proj.create_weight_tensors(ctx);
     }
 
@@ -274,7 +230,6 @@ struct MLP {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "c_fc.");
         c_fc.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "c_proj.");
         c_proj.setup_weight_names(s);
     }
@@ -314,12 +269,10 @@ struct ResidualCrossAttentionBlock {
     const int data_width = 1024;
     const int mlp_expand_ratio = 4;
 
-    // network params
     struct MultiheadCrossAttention attn;
     struct LayerNorm ln_1;
     struct LayerNorm ln_2;
     struct LayerNorm ln_3;
-
     struct MLP mlp;
 
     void create_weight_tensors(struct ggml_context* ctx) {
@@ -354,22 +307,14 @@ struct ResidualCrossAttentionBlock {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "ln_1.");
         ln_1.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "ln_2.");
         ln_2.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "ln_3.");
         ln_3.setup_weight_names(s);
 
         snprintf(s, sizeof(s), "%s%s", prefix, "mlp.");
         mlp.setup_weight_names(s);
     }
-
-
-    // def forward(self, x, data):
-    //     x = x + self.attn(self.ln_1(x), self.ln_2(data))
-    //     x = x + self.mlp(self.ln_3(x))
-    //     return x
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* data) {
         ggml_tensor_t *x1 = ln_1.forward(ctx, x);
@@ -392,7 +337,6 @@ struct FourierEmbedder {
 
     void create_weight_tensors(struct ggml_context* ctx) {
         GGML_UNUSED(ctx);
-
         // frequencies = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, num_freqs, 1);
     }
 
@@ -424,11 +368,8 @@ struct FourierEmbedder {
         // frequencies    f32 [8, 1, 1, 1], 
 
         float data[8] = {1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f};
-        #if 0 // xxxx_8888
-         ggml_backend_tensor_set(frequencies, data, 0, ggml_nbytes(frequencies));
-        #endif
+        ggml_backend_tensor_set(frequencies, data, 0, ggml_nbytes(frequencies));
 
-        // #### xxxx_9999
         embed = ggml_mul(ctx, embed, frequencies); // Dot
         // embed f32 [8, 3, 148225, 1],
 
@@ -442,90 +383,22 @@ struct FourierEmbedder {
     }
 };
 
-struct CrossAttentionDecoder {
-    const int out_channels = 1;
-    const int width = 1024;
-    const int heads = 16;
-    const int mlp_expand_ratio = 4;
-    
-    // network params
-    struct FourierEmbedder fourier_embedder;
-    struct Linear query_proj;
-    struct ResidualCrossAttentionBlock cross_attn_decoder;
-    struct LayerNorm ln_post;
-    struct Linear output_proj;
-
-    void create_weight_tensors(struct ggml_context* ctx) {
-        fourier_embedder.create_weight_tensors(ctx);
-
-        query_proj.in_features = 51; // fourier_embedder.out_dim
-        query_proj.out_features = width;
-        query_proj.has_bias = true; // Fixed default
-        query_proj.create_weight_tensors(ctx);
-
-        // cross_attn_decoder.width = 1024; // width
-        // cross_attn_decoder.int heads = 16; // heads
-        // cross_attn_decoder.data_width = 1024;
-        // cross_attn_decoder.mlp_expand_ratio = 4; // mlp_expand_ratio
-        cross_attn_decoder.create_weight_tensors(ctx);
-
-        ln_post.normalized_shape = width;
-        ln_post.eps = 1e-5; // Fixed default values
-        ln_post.elementwise_affine = true;
-        ln_post.create_weight_tensors(ctx);
-
-        output_proj.in_features = width;
-        output_proj.out_features = out_channels;
-        output_proj.has_bias = true; // Fixed default
-        output_proj.create_weight_tensors(ctx);
-    }
-
-    void setup_weight_names(const char *prefix) {
-        char s[GGML_MAX_NAME];
-        snprintf(s, sizeof(s), "%s%s", prefix, "fourier_embedder.");
-        fourier_embedder.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "query_proj.");
-        query_proj.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "cross_attn_decoder.");
-        cross_attn_decoder.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "ln_post.");
-        ln_post.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "output_proj.");
-        output_proj.setup_weight_names(s);
-    }
-
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* queries, ggml_tensor_t *latents) {
-        ggml_tensor_t *x;
-        x = fourier_embedder.forward(ctx, queries);
-        x = query_proj.forward(ctx, x);
-        x = cross_attn_decoder.forward(ctx, x, latents);
-        x = ln_post.forward(ctx, x);
-        x = output_proj.forward(ctx, x);
-
-        return x;
-    }
-};
 
 struct QKVMultiheadAttention {
     const int width = 1024;
     const int heads = 16;
 
-    // network params
     struct LayerNorm q_norm;
     struct LayerNorm k_norm;
 
     void create_weight_tensors(struct ggml_context* ctx) {
         q_norm.normalized_shape = width/heads;
-        q_norm.eps = 1e-6; // Fixed default values
+        q_norm.eps = 1e-6;
         q_norm.elementwise_affine = true;
         q_norm.create_weight_tensors(ctx);
 
         k_norm.normalized_shape = width/heads;
-        k_norm.eps = 1e-6; // Fixed default values
+        k_norm.eps = 1e-6;
         k_norm.elementwise_affine = true;
         k_norm.create_weight_tensors(ctx);
     }
@@ -535,7 +408,6 @@ struct QKVMultiheadAttention {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "q_norm.");
         q_norm.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "k_norm.");
         k_norm.setup_weight_names(s);        
     }
@@ -594,7 +466,6 @@ struct MultiheadAttention {
     const int width = 1024;
     const int heads = 16;
 
-    // network params
     struct Linear c_qkv;
     struct Linear c_proj;
     struct QKVMultiheadAttention attention;
@@ -602,12 +473,12 @@ struct MultiheadAttention {
     void create_weight_tensors(struct ggml_context* ctx) {
         c_qkv.in_features = width;
         c_qkv.out_features = width * 3;
-        c_qkv.has_bias = false; // Fixed default
+        c_qkv.has_bias = false;
         c_qkv.create_weight_tensors(ctx);
 
         c_proj.in_features = width;
         c_proj.out_features = width;
-        c_proj.has_bias = true; // Fixed default
+        c_proj.has_bias = true;
         c_proj.create_weight_tensors(ctx);
 
         // attention.heads = 16;
@@ -620,10 +491,8 @@ struct MultiheadAttention {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "c_qkv.");
         c_qkv.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "c_proj.");
         c_proj.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "attention.");
         attention.setup_weight_names(s);
     }
@@ -655,12 +524,10 @@ struct MultiheadAttention {
   (ln_2): LayerNorm((1024,), eps=1e-06, elementwise_affine=True)
 ) */
 
-
 struct ResidualAttentionBlock {
     const int width = 1024;
     const int heads = 16;
     
-    // network params
     struct MultiheadAttention attn;
     struct LayerNorm ln_1;
     struct MLP mlp;
@@ -689,24 +556,15 @@ struct ResidualAttentionBlock {
         char s[GGML_MAX_NAME];
         snprintf(s, sizeof(s), "%s%s", prefix, "attn.");
         attn.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "ln_1.");
         ln_1.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "mlp.");
         mlp.setup_weight_names(s);
-
         snprintf(s, sizeof(s), "%s%s", prefix, "ln_2.");
         ln_2.setup_weight_names(s);
     }
 
-    //     def forward(self, x):
-    //         x = x + self.attn(self.ln_1(x))
-    //         x = x + self.mlp(self.ln_2(x))
-    //         return x
-
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
         ggml_tensor_t *x1 = ln_1.forward(ctx, x);
         x1 = attn.forward(ctx, x1);
         x = ggml_add(ctx, x, x1);
@@ -746,10 +604,8 @@ struct ResidualAttentionBlock {
 struct Transformer {
     const int width = 1024;
     const int heads = 16;
-    // const int layers = 16;
 
-    // network params
-    struct ResidualAttentionBlock resblocks[16];
+    struct ResidualAttentionBlock resblocks[16]; // const int layers = 16;
 
     void create_weight_tensors(struct ggml_context* ctx) {
         for (int i = 0; i < 16; i++) {
@@ -777,22 +633,16 @@ struct Transformer {
 };
 
 // struct ShapeVAE
-struct ShapeNetwork : GGMLNetwork {
+struct ShapeVaeNetwork : ggml::GGMLNetwork {
     const int num_latents = 512;
     const int embed_dim = 64;
     const int width = 1024;
     const int heads = 16;
     const int grid_res = 385;
+    const float scale_factor = 1.0188137142395404;
 
-    // const int num_decoder_layers = 16;
-
-    // network hparams
-    float scale_factor = 1.0188137142395404;
-
-    // network params
     struct Linear post_kl;
     struct Transformer transformer;
-    struct CrossAttentionDecoder geo_decoder;
 
     size_t get_graph_size()
     {
@@ -809,12 +659,6 @@ struct ShapeNetwork : GGMLNetwork {
         // transformer.width = 1024; // width
         // transformer.heads = 16; // heads
         transformer.create_weight_tensors(ctx);
-
-        // geo_decoder.out_channels = 1; // out_channels
-        // geo_decoder.width = 1024; // width
-        // geo_decoder.heads = 16; // heads
-        // geo_decoder.mlp_expand_ratio = 4; // mlp_expand_ratio
-        geo_decoder.create_weight_tensors(ctx);
     }
 
     void setup_weight_names(const char *prefix) {
@@ -825,151 +669,164 @@ struct ShapeNetwork : GGMLNetwork {
 
         snprintf(s, sizeof(s), "%s%s", prefix, "transformer.");
         transformer.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "geo_decoder.");
-        geo_decoder.setup_weight_names(s);
     }
-
-    // def forward(self, latents):
-    //     # 1. latents decode
-    //     latents = latents/self.scale_factor 
-    //     # tensor [latents] size: [1, 512, 64], min: -4.003906, max: 3.90625, mean: 0.018309
-    //     latents = self.post_kl(latents)
-    //     latents = self.transformer(latents)
-    //     # tensor [latents] size: [1, 512, 1024], min: -374.5, max: 37.09375, mean: 0.019848
-
-    //     # 2. latents to 3d volume
-    //     grid_res = 384
-    //     num_chunks = 8000
-    //     batch_size = latents.shape[0] # 1
-    //     xyz_samples = dense_grid(384)
-    //     xyz_samples = xyz_samples.view(-1, 3).to(latents.device)
-    //     # tensor [xyz_samples] size: [57066625, 3], min: -1.009766, max: 1.009766, mean: 0.0
-
-    //     # running on cuda device
-    //     batch_logits = []
-    //     for start in tqdm(range(0, xyz_samples.shape[0], num_chunks), desc=f"Volume Decoding"):
-    //         chunk_queries = xyz_samples[start: start + num_chunks, :]
-    //         chunk_queries = repeat(chunk_queries, "p c -> b p c", b=batch_size)
-    //         logits = self.geo_decoder(queries=chunk_queries, latents=latents)
-    //         batch_logits.append(logits)
-    //     # len(batch_logits) -- 7134
-    //     # batch_logits[0].size() -- [1, 8000, 1]
-    //     grid_logits = torch.cat(batch_logits, dim=1) # torch.cat(batch_logits, dim=1).size() -- [1, 57066625, 1]
-    //     # grid_size --[385, 385, 385]
-    //     grid_logits = grid_logits.view((batch_size, grid_res + 1, grid_res + 1, grid_res + 1)).float()
-    //     # 385*385*385 === 57066625
-    //     # tensor [grid_logits] size: [1, 385, 385, 385], min: -1.082031, max: 1.067383, mean: -0.787309
-    //     return grid_logits
-
 
     ggml_tensor_t* forward(ggml_context_t* ctx, int argc, ggml_tensor_t* argv[]) {
         GGML_ASSERT(argc == 1);
         ggml_tensor_t *latents = argv[0];
-        //     # tensor [latents] size: [1, 512, 64], min: -4.003906, max: 3.90625, mean: 0.018309
 
-        // 1. latents decode
+        //     # tensor [latents] size: [1, 512, 64], min: -4.003906, max: 3.90625, mean: 0.018309
         latents = ggml_scale(ctx, latents, scale_factor);
         latents = post_kl.forward(ctx, latents);
         latents = transformer.forward(ctx, latents);
 
-        // 2. latents to 3d volume
-        int batch_size = latents->ne[2]; // === 1
-        GGML_ASSERT(batch_size == 1);
-
-        // return latents;
-
-        // 3. running geo_decoder
-        ggml_tensor_t *chunk_queries = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, grid_res*grid_res, 1);
-        ggml_tensor_t *logits;
-        ggml_tensor_t *grid_logits = nullptr;
-
-        for (int n = 0; n < grid_res; n++) {
-            // CheckPoint("============================ n = %d", n);
-
-            std::vector<float> data = dense_grid_data(n, grid_res, 1.01);
-
-            // CheckPoint("dense_grid_fill 1");
-            #if 0 // xxxx_8888
-            dense_grid_fill(chunk_queries, data); // xxxx_8888
-            #endif
-            // CheckPoint("dense_grid_fill 2");
-
-            // ggml_tensor_dump("chunk_queries", chunk_queries);
-            logits = geo_decoder.forward(ctx, chunk_queries, latents);
-
-            if (grid_logits == nullptr) {
-                grid_logits = ggml_dup(ctx, logits);
-            } else {
-                grid_logits = ggml_concat(ctx, grid_logits, logits, 1/*dim*/);
-            }
-            // ggml_tensor_dump("grid_logits", grid_logits);
-        }
-
-        CheckPoint(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-        ggml_tensor_dump("grid_logits", grid_logits);
-        // grid_logits    f32 [1, 57066625, 1, 1], 
-
-        // CheckPoint(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-        // GGML_API struct ggml_tensor * ggml_view_4d(
-        //         struct ggml_context * ctx,
-        //         struct ggml_tensor  * a,
-        //         int64_t               ne0,
-        //         int64_t               ne1,
-        //         int64_t               ne2,
-        //         int64_t               ne3,
-        //         size_t                nb1, // row   stride in bytes
-        //         size_t                nb2, // slice stride in bytes
-        //         size_t                nb3,
-        //         size_t                offset);
-
-        // grid_logits = ggml_view_4d(ctx, grid_logits, grid_res, grid_res, grid_res, 1, grid_logits->nb[1], grid_logits->nb[2], grid_logits->nb[3], 0);
-        // ggml_tensor_dump("grid_logits", grid_logits);
-        // // grid_logits    f32 [385, 385, 385, 1],  (reshaped)
-        // CheckPoint(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-
-    	return grid_logits;
+        // tensor [latents] size: [1, 512, 1024], min: -374.5, max: 37.09375, mean: 0.019848
+        return latents;
     }
 };
 
 
+struct GeoDecoder : ggml::GGMLNetwork {
+    const int out_channels = 1;
+    const int width = 1024;
+    const int heads = 16;
+    const int mlp_expand_ratio = 4;
+    
+    // network params
+    struct FourierEmbedder fourier_embedder;
+    struct Linear query_proj;
+    struct ResidualCrossAttentionBlock cross_attn_decoder;
+    struct LayerNorm ln_post;
+    struct Linear output_proj;
 
-struct ShapeModel {
-    ShapeNetwork shape_net;
-    GGMLModel model;
+    void create_weight_tensors(struct ggml_context* ctx) {
+        fourier_embedder.create_weight_tensors(ctx);
 
-    int init(int device)
-    {
-        // -----------------------------------------------------------------------------------------
-        shape_net.set_device(device);
-        shape_net.start_engine();
-        shape_net.dump();
+        query_proj.in_features = 51; // fourier_embedder.out_dim
+        query_proj.out_features = width;
+        query_proj.has_bias = true; // Fixed default
+        query_proj.create_weight_tensors(ctx);
 
-        CheckPoint();
-        check_point(model.preload("models/image3d_shapevae_f16.gguf") == RET_OK);
-        CheckPoint();
+        // cross_attn_decoder.width = 1024; // width
+        // cross_attn_decoder.int heads = 16; // heads
+        // cross_attn_decoder.data_width = 1024;
+        // cross_attn_decoder.mlp_expand_ratio = 4; // mlp_expand_ratio
+        cross_attn_decoder.create_weight_tensors(ctx);
 
-        // load weights ...
-        shape_net.load_weight(&model, "");
+        ln_post.normalized_shape = width;
+        ln_post.eps = 1e-5; // Fixed default values
+        ln_post.elementwise_affine = true;
+        ln_post.create_weight_tensors(ctx);
 
-        return RET_OK;
+        output_proj.in_features = width;
+        output_proj.out_features = out_channels;
+        output_proj.has_bias = true; // Fixed default
+        output_proj.create_weight_tensors(ctx);
     }
 
-    TENSOR* forward(TENSOR* latents)
-    {
-        TENSOR* argv[1];
-        argv[0] = latents;
-
-        TENSOR* y = shape_net.engine_forward(ARRAY_SIZE(argv), argv);
-
-        return y;
+    void setup_weight_names(const char *prefix) {
+        char s[GGML_MAX_NAME];
+        snprintf(s, sizeof(s), "%s%s", prefix, "fourier_embedder.");
+        fourier_embedder.setup_weight_names(s);
+        snprintf(s, sizeof(s), "%s%s", prefix, "query_proj.");
+        query_proj.setup_weight_names(s);
+        snprintf(s, sizeof(s), "%s%s", prefix, "cross_attn_decoder.");
+        cross_attn_decoder.setup_weight_names(s);
+        snprintf(s, sizeof(s), "%s%s", prefix, "ln_post.");
+        ln_post.setup_weight_names(s);
+        snprintf(s, sizeof(s), "%s%s", prefix, "output_proj.");
+        output_proj.setup_weight_names(s);
     }
 
-    void exit()
-    {
-        model.clear();
-        shape_net.stop_engine();
+    ggml_tensor_t* forward(ggml_context_t* ctx, int argc, ggml_tensor_t* argv[]) {
+        GGML_ASSERT(argc == 2);
+        ggml_tensor_t *queries = argv[0];
+        ggml_tensor_t *latents = argv[1];
+
+        ggml_tensor_t *x;
+        x = fourier_embedder.forward(ctx, queries);
+        x = query_proj.forward(ctx, x);
+        x = cross_attn_decoder.forward(ctx, x, latents);
+        x = ln_post.forward(ctx, x);
+        x = output_proj.forward(ctx, x);
+
+        return x;
     }
 };
 
+
+// struct ShapeVaeModel {
+//     ShapeVaeNetwork shape_vae_net;
+
+//     int init(int device)
+//     {
+//         GGMLModel model;
+
+//         shape_vae_net.set_device(device);
+//         shape_vae_net.start_engine();
+//         shape_vae_net.dump();
+//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
+//         shape_vae_net.load_weight(&model, "shape_vae.");
+//         model.clear();
+
+//         return RET_OK;
+//     }
+
+//     TENSOR* forward(TENSOR* latents)
+//     {
+//         TENSOR* argv[1];
+//         argv[0] = latents;
+
+//         // # tensor [latents] size: [1, 512, 64], min: -4.003906, max: 3.90625, mean: 0.018309
+//         TENSOR* y = shape_vae_net.engine_forward(ARRAY_SIZE(argv), argv);
+//         // # tensor [latents] size: [1, 512, 1024], min: -374.5, max: 37.09375, mean: 0.019848
+
+//         return y;
+//     }
+
+//     void exit()
+//     {
+//         shape_vae_net.stop_engine();
+//     }
+// };
+
+
+// struct GeoDecoderModel {
+//     GeoDecoder geo_decorde_net;
+
+//     int init(int device)
+//     {
+//         ggml::GGMLModel model;
+
+//         // -----------------------------------------------------------------------------------------
+//         geo_decorde_net.set_device(device);
+//         geo_decorde_net.start_engine();
+//         geo_decorde_net.dump();
+//         check_point(model.preload("models/image3d_shape.gguf") == RET_OK);
+//         // load weights ...
+//         geo_decorde_net.load_weight(&model, "shape_vae.geo_decoder.");
+//         model.clear();
+
+//         return RET_OK;
+//     }
+
+//     TENSOR* forward(TENSOR *queries, TENSOR* latents)
+//     {
+//         TENSOR* argv[1];
+//         argv[0] = queries;
+//         argv[1] = latents;
+
+//         // # tensor [queries] size: [1, 8000, 3], min: -1.009766, max: 1.009766, mean: -0.658704
+//         // # tensor [latents] size: [1, 512, 1024], min: -369.75, max: 36.4375, mean: 0.016268
+//         TENSOR* y = geo_decorde_net.engine_forward(ARRAY_SIZE(argv), argv);
+//         // # tensor [y] size: [1, 8000, 1], min: -1.000977, max: -0.999023, mean: -0.999919
+
+//         return y;
+//     }
+
+//     void exit()
+//     {
+//         geo_decorde_net.stop_engine();
+//     }
+// };
 #endif // __SHAPEVAE__H__

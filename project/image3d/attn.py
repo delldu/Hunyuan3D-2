@@ -23,8 +23,12 @@ class FourierEmbedder(nn.Module):
         # self.frequencies -- tensor([  1.,   2.,   4.,   8.,  16.,  32.,  64., 128.], device='cuda:0')
         # (x[..., None].contiguous() * self.frequencies).size() -- [1, 8000, 3, 8]
         # x.shape[:-1] -- [1, 8000]
-        pdb.set_trace()
-        
+
+        # -------------------------------------------------
+        # x.size() -- [1, 81920, 3]
+        # x[..., None].size() -- [1, 81920, 3, 1]
+        # self.frequencies.size() -- [8]
+
         embed = (x[..., None].contiguous() * self.frequencies).view(*x.shape[:-1], -1)
         # tensor [embed] size: [1, 8000, 24], min: -129.279999, max: 129.279999, mean: -20.998594
 
@@ -218,7 +222,7 @@ class Transformer(nn.Module):
         return x
 
 
-class CrossAttentionDecoder(nn.Module):
+class GeoDecoder(nn.Module):
     def __init__(self, out_channels=1, width=1024, heads=16, mlp_expand_ratio=4):
         super().__init__()
         assert out_channels == 1

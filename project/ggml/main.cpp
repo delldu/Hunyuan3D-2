@@ -13,22 +13,22 @@
 #include <unistd.h>
 // #include <glob.h>
 
-#include <ggml_engine.h>
-#include <nimage/tensor.h>
+// #include <ggml_engine.h>
+// #include <nimage/tensor.h>
 
-#include "dinov2.h"
-#include "dit.h"
-#include "shapevae.h"
+// #include "dinov2.h"
+// #include "dit.h"
+// #include "shapevae.h"
 
 #define DEFAULT_DEVICE 1
 #define DEFAULT_OUTPUT "output"
 
-// int image3d_predict(Dinov2Model* dinov2_model, char* gray_files, char* output_dir);
+int image3d_predict(int device, int argc, char *argv[], char* output_dir);
 
 static void image3d_help(char* cmd)
 {
     printf("Usage: %s [option] gray_files\n", cmd);
-    printf("    -h, --help                   Display this help, engine version %s.\n", GGML_ENGINE_VERSION);
+    printf("    -h, --help                   Display this help.\n");
     printf("    -d, --device <no>            Set device (0 -- cpu, 1 -- cuda0, 2 -- cuda1, ..., default: %d)\n", DEFAULT_DEVICE);
     printf("    -o, --output                 output dir, default: %s.\n", DEFAULT_OUTPUT);
 
@@ -142,36 +142,33 @@ int main(int argc, char** argv)
     }
 #endif
 
-#if 1
-    ShapeModel shape_model;
+#if 0
+    ShapeVaeModel shape_vae_model;
 
     // int network
     {
-        shape_model.init(device_no);
+        shape_vae_model.init(device_no);
     }
-
 
     for (int i = optind; i < argc; i++) {
-        // image3d_predict(&shape_model, argv[i], output_dir);
+        // image3d_predict(&shape_vae_model, argv[i], output_dir);
         printf("create from %s to %s ...\n", argv[i], output_dir);
+
+        TENSOR *x = tensor_create(1, 1, 512, 64);
+        TENSOR *y = shape_vae_model.forward(x);
+
+        tensor_show("y", y);
+
+        tensor_destroy(y);
+        tensor_destroy(x);
     }
-    TENSOR *x = tensor_create(1, 1, 512, 64);
-    TENSOR *y = shape_model.forward(x);
-
-    tensor_show("y", y);
-
     // # tensor [y] size: [1, 1370, 1536], min: -16.265625, max: 12.71875, mean: -0.01448
-
-    tensor_destroy(y);
-    tensor_destroy(x);
-
 
     // free network ...
     {
-        shape_model.exit();
+        shape_vae_model.exit();
     }
 #endif
 
-
-    return 0;
+    return image3d_predict(device_no, argc - optind, &argv[optind], output_dir);
 }
